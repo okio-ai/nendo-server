@@ -1,0 +1,170 @@
+# -*- encoding: utf-8 -*-
+# ruff: noqa: BLE001, T201
+"""Voice Analysis app."""
+import argparse
+import gc
+import re
+import signal
+from typing import Any, Callable, List
+
+import redis
+import torch
+from nendo import Nendo, NendoTrack
+from rq.job import Job
+
+TIMEOUT = 600
+
+
+def timeout_handler(num, stack):
+    raise TimeoutError("Operation timed out")
+
+
+def process_tracks_with_timeout(
+        job: Job,
+        timeout: int,
+        progress_info: str,
+        tracks: List[NendoTrack],
+        func: Callable,
+        **kwargs: Any,
+):
+    for i, track in enumerate(tracks):
+        signal.alarm(timeout)
+        try:
+            job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
+            job.save_meta()
+            func(track=track, **kwargs)
+        except Exception as e:
+            if "Operation timed out" in str(e):
+                err = f"Error processing track {track.id}: Operation Timed Out"
+            else:
+                err = f"Error processing track {track.id}: {e}"
+            # nd.logger.info(err)
+            job.meta["errors"] = job.meta["errors"] + [err]
+            job.save_meta()
+            raise
+        finally:
+            signal.alarm(0)
+
+
+def free_memory(to_delete: Any):
+    del to_delete
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
+
+
+def llm_analysis(
+        track: NendoTrack,
+        oom_threshold: int = 25000,
+        split_size: int = 20000,  # current max on A10 + mistral-8bitQ
+):
+    nd = Nendo()
+
+    transcription = track.get_plugin_value("transcription")
+
+    # filter timestamps
+    pattern = r"\[(\d{1,3}:\d{1,2})-(\d{1,3}:\d{1,2})\]:"
+    transcription = re.sub(pattern, "", transcription).replace("\n", "")
+
+    nd.logger.warning(f"Transcription Length: {len(transcription)}")
+
+    if len(transcription) > oom_threshold:
+        summaries = []
+        splits = [transcription[i:i + split_size] for i in range(0, len(transcription), split_size)]
+        for j, split in enumerate(splits):
+            nd.logger.warning(f"split {j}/{len(splits)}")
+            nd.logger.warning(f"split {split}")
+            split_summary = nd.plugins.textgen.summarization(prompt=split)
+            nd.logger.warning(f"summary {split_summary}")
+            summaries.append(split_summary)
+
+        transcription = " ".join(summaries)
+        transcription = transcription.replace("\n", "")
+
+    templates = nd.plugins.textgen.templates()
+    result = nd.plugins.textgen(
+        prompts=[transcription, transcription, transcription],
+        system_prompts=[
+            templates.TOPIC_DETECTION,
+            templates.SENTIMENT_ANALYSIS,
+            templates.SUMMARIZATION,
+        ],
+    )
+    topics, sentiments, summary = result[0], result[1], result[2]
+    nd.logger.warning(f"topics {topics}")
+    nd.logger.warning(f"sentiments {sentiments}")
+    nd.logger.warning(f"summary {summary}")
+
+
+    track.add_plugin_data(
+        key="summary",
+        value=summary,
+        plugin_name="nendo_plugin_textgen",
+        plugin_version="0.1.0",
+    )
+    track.add_plugin_data(
+        key="sentiment_analysis",
+        value=sentiments,
+        plugin_name="nendo_plugin_textgen",
+        plugin_version="0.1.0",
+    )
+    track.add_plugin_data(
+        key="topic_detection",
+        value=topics,
+        plugin_name="nendo_plugin_textgen",
+        plugin_version="0.1.0",
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Voice analysis.")
+    parser.add_argument("--user_id", type=str, required=True)
+    parser.add_argument("--job_id", type=str, required=True)
+    parser.add_argument("--target_id", type=str, required=True)
+
+    args = parser.parse_args()
+    nd = Nendo()
+    redis_conn = redis.Redis(
+        host="redis",
+        port=6379,
+        db=0,
+    )
+    job = Job.fetch(args.job_id, connection=redis_conn)
+    job.meta["errors"] = []
+    job.save_meta()
+
+    if args.target_id is None or len(args.target_id) == 0:
+        tracks = nd.get_tracks()
+    else:
+        track_or_collection = nd.get_track_or_collection(args.target_id)
+        if type(track_or_collection) == NendoTrack:
+            run_on_collection = False
+            tracks = [track_or_collection]
+        else:
+            run_on_collection = True
+            tracks = track_or_collection.tracks()
+
+    process_tracks_with_timeout(
+        job, TIMEOUT, "Transcribing", tracks, nd.plugins.transcribe_whisper,
+        return_timestamps=True,
+    )
+    free_memory(nd.plugins.transcribe_whisper.plugin_instance.pipe)
+
+    process_tracks_with_timeout(
+        job, TIMEOUT, "LLM Analyzing", tracks, llm_analysis,
+    )
+    free_memory(nd.plugins.textgen.plugin_instance.model)
+
+    process_tracks_with_timeout(
+        job, TIMEOUT, "Embedding", tracks, nd.library.embed_track,
+    )
+    free_memory(nd.plugins.embed_clap.plugin_instance)
+
+    if run_on_collection:
+        print(f"collection/{args.target_id}")
+    else:
+        print(tracks[-1].id)
+
+
+if __name__ == "__main__":
+    main()
