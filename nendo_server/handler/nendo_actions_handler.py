@@ -30,6 +30,7 @@ def dockerized_func(
     script_path: str,
     command: str,
     plugins: List[str],
+    nendo_cfg: BaseSettings,
     cfg: BaseSettings,
     use_gpu: bool = True,
     container_name: Optional[str] = None,
@@ -83,6 +84,11 @@ def dockerized_func(
         "POSTGRES_DB": cfg.container_postgres_db,
         "USE_GPU": use_gpu,
         "REPLACE_PLUGIN_DATA": replace_plugin_data,
+        "AUTO_RESAMPLE": nendo_cfg.auto_resample,
+        "DEFAULT_SR": nendo_cfg.default_sr,
+        "COPY_TO_LIBRARY": nendo_cfg.copy_to_library,
+        "AUTO_CONVERT": nendo_cfg.auto_convert,
+        "SKIP_DUPLICATE": nendo_cfg.skip_duplicate,
     }
     if env is not None:
         env_vars.update(env)
@@ -207,7 +213,8 @@ def dockerized_func(
 class NendoActionsHandler:
     """Nendo actions handler."""
 
-    def __init__(self, server_config, nendo_instance, logger, redis, worker_manager):
+    def __init__(self, nendo_config, server_config, nendo_instance, logger, redis, worker_manager):
+        self.nendo_config = nendo_config
         self.server_config = server_config
         self.nendo_instance = nendo_instance
         self.logger = logger
@@ -306,6 +313,7 @@ class NendoActionsHandler:
             script_path,
             command,
             plugins,
+            self.nendo_config,
             self.server_config,
             gpu,
             container_name,

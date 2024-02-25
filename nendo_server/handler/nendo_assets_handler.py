@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import logging
     import uuid
 
-    from nendo import Nendo
+    from nendo import Nendo, NendoTrack
 
 class NendoAssetsHandler(ABC):
     nendo_instance: Nendo = None
@@ -93,7 +93,7 @@ class NendoAssetsHandler(ABC):
         self,
         file_path: str,
         user_id: Optional[uuid.UUID] = None,
-    ) -> List[str]:
+    ) -> List[NendoTrack]:
         # check the extension of the file is a supported audio file
         if AudioFileUtils().is_supported_filetype(file_path):
             track = self.nendo_instance.library.add_track(
@@ -116,7 +116,7 @@ class NendoAssetsHandler(ABC):
                     "320k",
                     transcoded_library_path,
                 ])
-            return [str(track.id)] if track is not None else []
+            return [track] if track is not None else []
 
         supported_compressed_types = ["zip", "tar", "gz"]
         if file_path.lower().split(".")[-1] not in supported_compressed_types:
@@ -128,7 +128,7 @@ class NendoAssetsHandler(ABC):
 
         extraction_result = extractor.extract(file_path)
         try:
-            all_track_ids = []
+            all_tracks = []
             for file in extraction_result.extracted_files:
                 track = self.nendo_instance.library.add_track(
                     file_path=file, user_id=user_id,
@@ -137,14 +137,14 @@ class NendoAssetsHandler(ABC):
                 if track is None:
                     self.logger.error(f"Failed to add file: {file}")
                 else:
-                    all_track_ids.append(str(track.id))
+                    all_tracks.append(track)
         except Exception as e:
             self.logger.error(f"Error adding files to library: {e}")
             extraction_result.destroy_extracted_dir()
             return []
 
         extraction_result.destroy_extracted_dir()
-        return all_track_ids
+        return all_tracks
 
     # def add_to_library_as_collection(
     #     self,

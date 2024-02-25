@@ -46,6 +46,7 @@ class LocalNendoHandlerFactory(NendoHandlerFactory):
             return LocalAssetsHandler(self.nendo_instance, self.config, self.logger)
         if handler_type == HandlerType.ACTIONS:
             return LocalActionsHandler(
+                self.nendo_instance.config,
                 self.config,
                 self.nendo_instance,
                 self.logger,
@@ -68,6 +69,7 @@ class RemoteNendoHandlerFactory(NendoHandlerFactory):
             return LocalAssetsHandler(self.nendo_instance, self.config, self.logger)
         if handler_type == HandlerType.ACTIONS:
             return RemoteActionsHandler(
+                self.nendo_instance.config,
                 self.config,
                 self.nendo_instance,
                 self.logger,

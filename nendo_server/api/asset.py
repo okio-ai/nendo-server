@@ -77,7 +77,7 @@ async def upload_audio_post(
                 await out_file.write(content)
             request.app.state.logger.info(f"Done writing tempfile: {out_file.name}")
 
-            track_ids = assets_handler.add_to_library(
+            tracks = assets_handler.add_to_library(
                 file_path=out_file.name,
                 user_id=user.id,
             )
@@ -87,29 +87,31 @@ async def upload_audio_post(
     finally:
         temp_dir.cleanup()
 
-    if len(track_ids) == 0:
+    if len(tracks) == 0:
         # TODO handle unsupported file type and throw 422
         # raise HTTPException(status_code=422, detail="Filetype not supported")
         return JSONResponse(status_code=500, content={"status": "failed"})
 
-    action_handler.create_action(
-        user_id=str(user.id),
-        action_name="Render spectrogram",
-        gpu=False,
-        func=create_spectrogram,
-        track_ids=track_ids,
-    )
+    for track in tracks:
+        if not any([image.meta["image_type"] == "spectrogram" for image in track.images]):
+            action_handler.create_action(
+                user_id=str(user.id),
+                action_name="Render spectrogram",
+                gpu=False,
+                func=create_spectrogram,
+                track_ids=[track.id],
+            )
 
-    return_id = track_ids[0]
+    return_id = str(tracks[0].id)
     # add track(s) to collection
     if len(collection_id) > 0:
         collection_handler = handler_factory.create(
             handler_type=HandlerType.COLLECTIONS,
         )
-        for track_id in track_ids:
+        for track in tracks:
             collection_handler.add_track_to_collection(
                 collection_id=collection_id,
-                track_id=track_id,
+                track_id=track.id,
             )
         return_id = f"collection/{collection_id}"
 
@@ -118,7 +120,7 @@ async def upload_audio_post(
     if len(run_action) > 0:
         if run_action not in ACTIONS:
             return JSONResponse(status_code=400, content={"status": "Unknown action"})
-        for track_id in track_ids:
+        for track in tracks:
             action_id = action_handler.create_docker_action(
                 user_id=str(user.id),
                 image=ACTIONS[run_action]["image"],
@@ -130,7 +132,7 @@ async def upload_audio_post(
                 exec_run=False,
                 replace_plugin_data=False,
                 func_timeout=0,
-                target_id=track_id,
+                target_id=track.id,
             )
         return_dict.update({"action_id": action_id})
 
