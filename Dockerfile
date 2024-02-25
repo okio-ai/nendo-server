@@ -25,7 +25,7 @@ RUN usermod -aG docker nendo
 USER nendo
 
 ENV PATH="$PATH:/home/nendo/.local/bin"
-WORKDIR /home/nendo/nendo_server
+WORKDIR /home/nendo/nendo-server
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
@@ -42,7 +42,7 @@ USER root
 RUN mkdir /home/nendo/nendo_library
 RUN chown -R nendo:nendo /home/nendo/
 USER nendo
-WORKDIR /home/nendo/nendo_server/nendo_server
+WORKDIR /home/nendo/nendo-server/nendo_server
 
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-config", "logger/conf.yaml"]
 
