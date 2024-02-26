@@ -67,7 +67,7 @@ async def upload_audio_post(
     try:
         temp_dir = tempfile.TemporaryDirectory()
 
-        track_ids = []
+        tracks = []
 
         async with aiofiles.open(
             os.path.join(temp_dir.name, file.filename),

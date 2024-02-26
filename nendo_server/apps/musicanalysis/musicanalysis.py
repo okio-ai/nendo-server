@@ -90,16 +90,11 @@ def main():
 
     restrict_tf_memory()
 
-    run_on_collection = False
-    if args.target_id is None or len(args.target_id) == 0:
-        tracks = nd.get_tracks()
-    else:
-        track_or_collection = nd.get_track_or_collection(args.target_id)
-        if type(track_or_collection) == NendoTrack:
-            tracks = [track_or_collection]
-        else:
-            run_on_collection = True
-            tracks = track_or_collection.tracks()
+    target_collection = nd.library.get_collection(
+        collection_id = args.target_id,
+        get_related_tracks=False,
+    )
+    tracks = target_collection.tracks()
 
     process_tracks_with_timeout(
         job, TIMEOUT, "Analyzing", tracks, nd.plugins.classify_core,
@@ -116,10 +111,19 @@ def main():
     )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
-    if run_on_collection:
-        print(f"collection/{args.target_id}")
+    if (target_collection.collection_type == "temp"):
+        nd.library.remove_collection(
+            collection_id=target_collection.id,
+            user_id=args.user_id,
+            remove_relationships=True,
+        )
     else:
+        print(f"collection/{args.target_id}")
+        return
+    if len(tracks) > 0:
         print(tracks[-1].id)
+    else:
+        print("")
 
 
 if __name__ == "__main__":

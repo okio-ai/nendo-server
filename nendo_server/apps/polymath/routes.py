@@ -49,6 +49,9 @@ async def run_polymath(
             container_name="",
             exec_run=False,
             replace_plugin_data=replace,
+            run_without_target=False,
+            max_track_duration=900.,  # 15 minutes per track
+            max_chunk_duration=1800., # 30 minutes per chunk
             env={"PYTORCH_NO_CUDA_MEMORY_CACHING": 1},
             func_timeout=0,
             target_id=target_id,
