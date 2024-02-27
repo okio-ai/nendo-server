@@ -152,13 +152,15 @@ def main():
             loop.set_meta({
                 "title": f"{args.prompt} - {i+1} - loop {j+1}",
             })
-        loops = loops + track_loops
+            finish_track(loop, None)            
+        loops = loops + track_loops.tracks()
         job.meta["progress"] = f"Post-processing generated Track {i + 1}/{len(generations)}"
         job.save_meta()
         track.set_meta({
             "title": f"{args.prompt} - {i+1}",
         })
         finish_track(track, None)
+    
         
 
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
