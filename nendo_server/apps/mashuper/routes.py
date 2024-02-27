@@ -22,7 +22,7 @@ class MusicParams(BaseModel):
     model: str
     prompts: List[str]
     generation_type: str  # 'unconditional', 'conditional' or 'melody'
-    tempo: float
+    tempo: int
     duration: int = 4
     track_id: str = None
     num_samples: int = 1
@@ -248,7 +248,7 @@ async def get_random_file(
 
         return JSONResponse(
             status_code=200,
-            content={"track_title": track_title, "task_id": action_id},
+            content={"track_title": track_title, "action_id": action_id},
         )
 
     raise HTTPException(status_code=404, detail="No audio files found.")
@@ -391,7 +391,7 @@ async def get_quantized(
                 target_track.get_meta("title") or
                 target_track.resource.meta["original_filename"]
             ),
-            "task_id": action_id,
+            "action_id": action_id,
         },
     )
     
@@ -427,8 +427,8 @@ async def generate_track(
             prompt=music_params.prompts[0],
             temperature=1.0, # TODO make configurable?
             cfg_coef=3.5, # TODO make configurable?
-            bpm=music_params.tempo,
-            duration=music_params.duration,
+            bpm=int(music_params.tempo),
+            duration=int(music_params.duration),
             # add_to_collection_id=add_to_collection_id,
             # n_samples=music_params.num_samples,
             # key=params["key"],
