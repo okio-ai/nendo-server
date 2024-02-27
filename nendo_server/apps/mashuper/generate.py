@@ -156,7 +156,7 @@ def main():
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
         print("collection/" + args.add_to_collection_id)
     else:
-        print(",".join([loop.id for loop in loops]))
+        print(",".join([str(loop.id) for loop in loops]))
 
 if __name__ == "__main__":
     main()
