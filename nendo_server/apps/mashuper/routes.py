@@ -4,19 +4,28 @@ import json
 import re
 import urllib.parse
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from auth.auth_db import User
 from auth.auth_users import fastapi_users
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
+from pydantic import BaseModel
 from sqlalchemy import and_
 
 from .model import Channel, Scene, SceneDB
 
 router = APIRouter()
 
+class MusicParams(BaseModel):
+    model: str
+    prompts: List[str]
+    generation_type: str  # 'unconditional', 'conditional' or 'melody'
+    tempo: float
+    duration: int = 4
+    track_id: str = None
+    num_samples: int = 1
 
 @router.post("/scenes")
 async def create_scene(
@@ -385,3 +394,52 @@ async def get_quantized(
             "task_id": action_id,
         },
     )
+    
+@router.post("/generate")
+async def generate_track(
+    request: Request,
+    music_params: MusicParams,
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user())):
+    """Generate a track with musicgen."""
+    actions_handler = handler_factory.create(handler_type=HandlerType.ACTIONS)
+
+    assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
+    if assets_handler.user_reached_storage_limit(str(user.id)):
+        raise HTTPException(status_code=507, detail="Storage limit reached")
+
+    try:
+        action_id = actions_handler.create_docker_action(
+            user_id=str(user.id),
+            image="nendo/musicgen",
+            gpu=True,
+            script_path="mashuper/generate.py",
+            plugins=[
+                "nendo_plugin_musicgen",
+                "nendo_plugin_loopify",
+            ],
+            action_name="Mashuper Generate",
+            container_name="",
+            exec_run=False,
+            replace_plugin_data=False,
+            func_timeout=0,
+            target_id="",
+            prompt=music_params.prompts[0],
+            temperature=1.0, # TODO make configurable?
+            cfg_coef=3.5, # TODO make configurable?
+            bpm=music_params.tempo,
+            duration=music_params.duration,
+            # add_to_collection_id=add_to_collection_id,
+            # n_samples=music_params.num_samples,
+            # key=params["key"],
+            # scale=params["scale"],
+            # model=music_params.generation_type,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
+
+    return JSONResponse(
+        status_code=200,
+        content={"status": "success", "action_id": action_id},
+    )
+    

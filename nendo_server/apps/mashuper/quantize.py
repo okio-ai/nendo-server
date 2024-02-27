@@ -1,5 +1,5 @@
 # -*- encoding: utf-8 -*-
-"""Actions used by the Mashuper app."""
+"""Quantize action used by the Mashuper app."""
 # ruff: noqa: ARG001, T201, D103
 
 import argparse
