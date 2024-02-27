@@ -139,19 +139,27 @@ def main():
     #     )
     #     collection_id = tmp_coll.id
 
+    loops = []
     for i, track in enumerate(generations):
         job.meta["progress"] = f"Loopifying generated Track {i + 1}/{len(generations)}"
-        loops = track.process(
+        job.save_meta()
+        track_loops = track.process(
             "nendo_plugin_loopify",
             n_loops=1,
             beats_per_loop=args.duration,
         )
+        for j, loop in enumerate(track_loops):
+            loop.set_meta({
+                "title": f"{args.prompt} - {i+1} - loop {j+1}",
+            })
+        loops = loops + track_loops
         job.meta["progress"] = f"Post-processing generated Track {i + 1}/{len(generations)}"
         job.save_meta()
         track.set_meta({
             "title": f"{args.prompt} - {i+1}",
         })
         finish_track(track, None)
+        
 
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
         print("collection/" + args.add_to_collection_id)
