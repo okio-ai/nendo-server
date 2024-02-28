@@ -80,12 +80,7 @@ def run_polymath(
     try:
         nd.logger.info(f"Processing Track {track.id}")
         duration = round(librosa.get_duration(y=track.signal, sr=track.sr), 3)
-        # workaround to assign proper titles
-        original_title = ""
-        if "title" in track.meta and track.meta["title"] is not None:
-            original_title = track.meta["title"]
-        else:
-            original_title = track.resource.meta["original_filename"]
+        original_title = track.meta["title"]
         if (classify is True and (
             len(
                 track.get_plugin_data(
