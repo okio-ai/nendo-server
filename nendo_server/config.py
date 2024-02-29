@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     num_user_cpu_workers: int = Field(default=3)
     num_gpu_workers: int = Field(default=1)
     user_storage_size: int = Field(default=-1)
+    chunk_actions: bool = Field(default=False)
 
     """
     Google OAuth integration

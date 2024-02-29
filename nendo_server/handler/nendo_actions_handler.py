@@ -14,9 +14,10 @@ import uuid
 from typing import TYPE_CHECKING, List, Optional
 
 import docker
+import librosa
 from docker.types import DeviceRequest
 from dto.actions import ActionStatus
-from nendo import NendoTrack
+from nendo import NendoCollection, NendoTrack
 from rq.command import send_stop_job_command
 from rq.job import Job
 
@@ -290,64 +291,179 @@ class NendoActionsHandler:
         container_name: str,
         exec_run: bool,
         replace_plugin_data: bool,
+        run_without_target: bool,
+        max_track_duration: float,
+        max_chunk_duration: float,
         env: Optional[dict] = None,
         func_timeout: int = 0,
         **kwargs, # these are the parameters for the action script
     ) -> str:
+        # get queues
         gpu = gpu and self.server_config.use_gpu
         cpu_queue, gpu_queue = self.worker_manager.get_user_queues(user_id)
         queue = gpu_queue if gpu else cpu_queue
+        
+        # assign job and container name
         letters_and_digits = string.ascii_letters + string.digits
         rnd_string = "".join(random.choice(letters_and_digits) for i in range(8))
         job_id = action_name.replace(" ", "_") + "_" + rnd_string
         container_name = container_name if exec_run is True else job_id
-        command = self._generate_command(
-            user_id,
-            job_id,
-            **kwargs,
+        
+        target_id = kwargs.get("target_id", "")
+        track_or_collection = self.nendo_instance.get_track_or_collection(
+            target_id,
         )
-        job = queue.enqueue(
-            dockerized_func,
-            user_id,
-            image,
-            script_path,
-            command,
-            plugins,
-            self.nendo_config,
-            self.server_config,
-            gpu,
-            container_name,
-            exec_run,
-            replace_plugin_data,
-            env,
-            func_timeout,
-            description=action_name,  # TODO improve description?
-            job_id=job_id,  # use custom job id (for in-job status reporting)
-            job_timeout="72h",  # TODO: make this configurable?
-            result_ttl="172800",  # 2 days retention of completed jobs
-        )
-        job.meta["action_name"] = action_name
-        job.meta["parameters"] = pprint.pformat(kwargs)
         target = {}
-        if "target_id" in kwargs:
-            target_id = kwargs["target_id"]
-            track_or_collection = self.nendo_instance.get_track_or_collection(
-                target_id,
-            )
-            if type(track_or_collection) == NendoTrack:
-                target.update({
-                    "target_type": "track",
-                })
-            else:
-                target.update({
-                    "target_type": "collection",
-                })
+        if track_or_collection is not None:
+            target.update({
+                "target_type": (
+                    "track" if isinstance(track_or_collection, NendoTrack) else
+                    "collection",
+                )
+            })
             target.update({
                 "target_id": target_id,
             })
-        job.meta["target"] = target
-        job.save_meta()
-        return job.id
+        target_collections = []
+        skipped_tracks = []
+        # apply chunking, if configured and applicable
+        if (self.server_config.chunk_actions and not run_without_target and
+            run_without_target is False
+            and gpu is True
+        ):
+            track_ids = []
+            # create a single chunk with the track in it
+            if isinstance(track_or_collection, NendoTrack):
+                # get track duration
+                duration = track_or_collection.get_meta("duration")
+                if duration is None:
+                    duration = round(librosa.get_duration(
+                        y=track_or_collection.signal,
+                        sr=track_or_collection.sr
+                    ), 1)
+                # skip track if duration exceeds maximum
+                if max_track_duration > 0. and duration > max_track_duration:
+                    skipped_tracks.append(track_or_collection.get_meta("title"))
+                else:
+                    track_ids.append(track_or_collection.id)
+                chunk_collection = self.nendo_instance.add_collection(
+                    name=job_id,
+                    user_id=user_id,
+                    track_ids=track_ids,
+                    collection_type="temp",
+                )
+                target_collections.append(chunk_collection.id)
+            else:
+                # split collection into chunks
+                if isinstance(track_or_collection, NendoCollection):
+                    tracks = track_or_collection.tracks()
+                # split the library into chunks
+                else:
+                    tracks = self.nendo_instance.library.get_tracks(
+                        user_id=user_id
+                    )
+                chunk_duration = 0.
+                chunk_nr = 0
+                chunk_collection = self.nendo_instance.library.add_collection(
+                    name=f"{job_id}_{chunk_nr}",
+                    user_id=user_id,
+                    track_ids=[],
+                    collection_type="temp",
+                )
+                target_collections.append(chunk_collection.id)
+                for track in tracks:
+                    # get track duration
+                    duration = track.get_meta("duration")
+                    if duration is None:
+                        duration = round(librosa.get_duration(
+                            y=track.signal,
+                            sr=track.sr
+                        ), 1)
+                    # skip track if duration exceeds maximum
+                    if max_track_duration > 0 and duration > max_track_duration:
+                        skipped_tracks.append(track.get_meta("title"))
+                    else:
+                        # if it fits, append to last chunk
+                        if (max_chunk_duration > 0. and 
+                            (chunk_duration + duration <= max_chunk_duration)
+                        ):
+                            self.nendo_instance.library.add_track_to_collection(
+                                track_id=track.id,
+                                collection_id=chunk_collection.id,
+                            )
+                            chunk_duration += duration
+                        # otherwise create new chunk
+                        else:
+                            chunk_nr += 1
+                            chunk_collection = self.nendo_instance.library.add_collection(
+                                name=f"{job_id}_{chunk_nr}",
+                                user_id=user_id,
+                                track_ids=[],
+                                collection_type="temp",
+                            )
+                            target_collections.append(chunk_collection.id)
+                            chunk_duration = 0.
+        else:
+            if isinstance(track_or_collection, NendoTrack):
+                temp_collection = self.nendo_instance.library.add_collection(
+                    name=job_id,
+                    user_id=user_id,
+                    track_ids=[track_or_collection.id],
+                    collection_type="temp",
+                )
+                target_collections.append(temp_collection.id)
+            elif isinstance(track_or_collection, NendoCollection):
+                target_collections.append(track_or_collection.id)
+            elif run_without_target is False:
+                temp_collection = self.nendo_instance.library.add_collection(
+                    name=job_id,
+                    user_id=user_id,
+                    track_ids=self.nendo_instance.library.get_tracks(),
+                    collection_type="temp",
+                )
+                target_collections.append(temp_collection.id)
+            else:
+                target_collections.append("")
+
+        # create actions
+        for i, collection_id in enumerate(target_collections):
+            kwargs["target_id"] = str(collection_id)
+            command = self._generate_command(
+                user_id,
+                f"{job_id}_{i}",
+                **kwargs,
+            )
+            action = queue.enqueue(
+                dockerized_func,
+                user_id,
+                image,
+                script_path,
+                command,
+                plugins,
+                self.nendo_config,
+                self.server_config,
+                gpu,
+                f"{container_name}_{i}",
+                exec_run,
+                replace_plugin_data,
+                env,
+                func_timeout,
+                description=action_name,  # TODO improve description?
+                job_id=f"{job_id}_{i}",  # use custom job id (for in-job status reporting)
+                job_timeout="72h",  # TODO: make this configurable?
+                result_ttl="172800",  # 2 days retention of completed jobs
+            )
+            action.meta["action_name"] = action_name
+            action.meta["parameters"] = pprint.pformat(kwargs)
+            action.meta["target"] = target
+            action.save_meta()
+        # add the skipped tracks to the last action's meta
+        action.meta["errors"] = [
+            f"Skipped {track}: Too long." for track in skipped_tracks
+        ]
+        action.save_meta()
+        # return the last job's ID
+        return action.id
 
     def get_action_status(self, user_id: str, action_id: str) -> str:
         try:

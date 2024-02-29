@@ -255,14 +255,11 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGALRM, timeout_handler)
 
-    if args.target_id is None or len(args.target_id) == 0:
-        tracks = nd.get_tracks()
-    else:
-        track_or_collection = nd.get_track_or_collection(args.target_id)
-        if type(track_or_collection) == NendoTrack:
-            tracks = [track_or_collection]
-        else:
-            tracks = track_or_collection.tracks()
+    target_collection = nd.library.get_collection(
+        collection_id = args.target_id,
+        get_related_tracks=False,
+    )
+    tracks = target_collection.tracks()
     num_tracks = len(tracks)
     for i, track in enumerate(tracks):
         results = run_polymath(
@@ -281,7 +278,16 @@ if __name__ == "__main__":
             embed=args.embed,
             add_to_collection_id=args.add_to_collection_id,
         )
+    if (target_collection.collection_type == "temp"):
+        nd.library.remove_collection(
+            collection_id=target_collection.id,
+            user_id=args.user_id,
+            remove_relationships=True,
+        )
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
         print("collection/" + args.add_to_collection_id)
     else:
-        print(results[-1].id)
+        if len(results) > 0:
+            print(results[-1].id)
+        else:
+            print("")

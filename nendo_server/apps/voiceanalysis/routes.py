@@ -38,6 +38,9 @@ async def run_voiceanalysis(
             container_name="",
             exec_run=False,
             replace_plugin_data=replace,
+            run_without_target=True,
+            max_track_duration=4500.,   # 2.5 hours per track
+            max_chunk_duration=36000.,  # 10 hours per chunk
             func_timeout=0,
             target_id=target_id,
         )
