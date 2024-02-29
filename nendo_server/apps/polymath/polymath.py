@@ -303,7 +303,7 @@ def run_polymath(
                             n_loops=n_loops,
                             beats_per_loop=beats_per_loop,
                         )
-                        for num_loop, lp in stem_loops:
+                        for num_loop, lp in enumerate(stem_loops):
                             if not lp.has_related_track(
                                 track_id=track.id,
                                 direction="from"
