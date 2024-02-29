@@ -4,46 +4,32 @@
 import argparse
 import gc
 import re
-import signal
 from typing import Any, Callable, List
 
 import redis
 import torch
 from nendo import Nendo, NendoTrack
 from rq.job import Job
-
-TIMEOUT = 600
-
-
-def timeout_handler(num, stack):
-    raise TimeoutError("Operation timed out")
+from wrapt_timeout_decorator import timeout
 
 
-def process_tracks_with_timeout(
+@timeout(600)
+def process_tracks(
         job: Job,
-        timeout: int,
         progress_info: str,
         tracks: List[NendoTrack],
         func: Callable,
         **kwargs: Any,
 ):
     for i, track in enumerate(tracks):
-        signal.alarm(timeout)
         try:
             job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
             job.save_meta()
             func(track=track, **kwargs)
         except Exception as e:
-            if "Operation timed out" in str(e):
-                err = f"Error processing track {track.id}: Operation Timed Out"
-            else:
-                err = f"Error processing track {track.id}: {e}"
-            # nd.logger.info(err)
+            err = f"Error processing track {track.id}: {e}"
             job.meta["errors"] = job.meta["errors"] + [err]
             job.save_meta()
-            raise
-        finally:
-            signal.alarm(0)
 
 
 def free_memory(to_delete: Any):
@@ -139,19 +125,19 @@ def main():
     )
     tracks = target_collection.tracks()
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Transcribing", tracks, nd.plugins.transcribe_whisper,
+    process_tracks(
+        job, "Transcribing", tracks, nd.plugins.transcribe_whisper,
         return_timestamps=True,
     )
     free_memory(nd.plugins.transcribe_whisper.plugin_instance.pipe)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "LLM Analyzing", tracks, llm_analysis,
+    process_tracks(
+        job, "LLM Analyzing", tracks, llm_analysis,
     )
     free_memory(nd.plugins.textgen.plugin_instance.model)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Embedding", tracks, nd.library.embed_track,
+    process_tracks(
+        job, "Embedding", tracks, nd.library.embed_track,
     )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 

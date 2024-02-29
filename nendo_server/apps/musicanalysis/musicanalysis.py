@@ -3,7 +3,6 @@
 # ruff: noqa: BLE001, I001, T201
 import argparse
 import gc
-import signal
 from typing import Any, Callable, List
 
 import redis
@@ -11,12 +10,7 @@ import torch
 from nendo import Nendo
 from nendo import NendoTrack
 from rq.job import Job
-
-TIMEOUT = 600
-
-
-def timeout_handler(num, stack):
-    raise TimeoutError("Operation timed out")
+from wrapt_timeout_decorator import timeout
 
 
 def restrict_tf_memory():
@@ -35,31 +29,23 @@ def restrict_tf_memory():
             print(e)
 
 
-def process_tracks_with_timeout(
+@timeout(600)
+def process_tracks(
         job: Job,
-        timeout: int,
         progress_info: str,
         tracks: List[NendoTrack],
         func: Callable,
         **kwargs: Any,
 ):
     for i, track in enumerate(tracks):
-        signal.alarm(timeout)
         try:
             job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
             job.save_meta()
             func(track=track, **kwargs)
         except Exception as e:
-            if "Operation timed out" in str(e):
-                err = f"Error processing track {track.id}: Operation Timed Out"
-            else:
-                err = f"Error processing track {track.id}: {e}"
-            # nd.logger.info(err)
+            err = f"Error processing track {track.id}: {e}"
             job.meta["errors"] = job.meta["errors"] + [err]
             job.save_meta()
-            return
-        finally:
-            signal.alarm(0)
 
 
 def free_memory(to_delete: Any):
@@ -86,8 +72,6 @@ def main():
     job.meta["errors"] = []
     job.save_meta()
 
-    signal.signal(signal.SIGALRM, timeout_handler)
-
     restrict_tf_memory()
 
     target_collection = nd.library.get_collection(
@@ -96,18 +80,18 @@ def main():
     )
     tracks = target_collection.tracks()
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Analyzing", tracks, nd.plugins.classify_core,
+    process_tracks(
+        job, "Analyzing", tracks, nd.plugins.classify_core,
     )
     free_memory(nd.plugins.classify_core.plugin_instance)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Captioning", tracks, nd.plugins.caption_lpmusiccaps,
+    process_tracks(
+        job, "Captioning", tracks, nd.plugins.caption_lpmusiccaps,
     )
     free_memory(nd.plugins.caption_lpmusiccaps.plugin_instance.model)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Embedding", tracks, nd.library.embed_track,
+    process_tracks(
+        job, "Embedding", tracks, nd.library.embed_track,
     )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
