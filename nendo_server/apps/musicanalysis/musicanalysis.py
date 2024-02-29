@@ -3,7 +3,7 @@
 # ruff: noqa: BLE001, I001, T201
 import argparse
 import gc
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 import redis
 import torch
@@ -30,22 +30,21 @@ def restrict_tf_memory():
 
 
 @timeout(600)
-def process_tracks(
+def process_track(
         job: Job,
         progress_info: str,
-        tracks: List[NendoTrack],
+        track: NendoTrack,
         func: Callable,
         **kwargs: Any,
 ):
-    for i, track in enumerate(tracks):
-        try:
-            job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
-            job.save_meta()
-            func(track=track, **kwargs)
-        except Exception as e:
-            err = f"Error processing track {track.id}: {e}"
-            job.meta["errors"] = job.meta["errors"] + [err]
-            job.save_meta()
+    try:
+        job.meta["progress"] = progress_info
+        job.save_meta()
+        func(track=track, **kwargs)
+    except Exception as e:
+        err = f"Error processing track {track.id}: {e}"
+        job.meta["errors"] = job.meta["errors"] + [err]
+        job.save_meta()
 
 
 def free_memory(to_delete: Any):
@@ -79,19 +78,31 @@ def main():
     )
     tracks = target_collection.tracks()
 
-    process_tracks(
-        job, "Analyzing", tracks, nd.plugins.classify_core,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"Analyzing Track {i + 1}/{len(tracks)}",
+            track,
+            nd.plugins.classify_core,
+        )
     free_memory(nd.plugins.classify_core.plugin_instance)
 
-    process_tracks(
-        job, "Captioning", tracks, nd.plugins.caption_lpmusiccaps,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"Analyzing Track {i + 1}/{len(tracks)}",
+            track,
+            nd.plugins.caption_lpmusiccaps,
+        )
     free_memory(nd.plugins.caption_lpmusiccaps.plugin_instance.model)
 
-    process_tracks(
-        job, "Embedding", tracks, nd.library.embed_track,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"Embedding Track {i + 1}/{len(tracks)}",
+            track,
+            nd.library.embed_track,
+        )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
     if (target_collection.collection_type == "temp"):
