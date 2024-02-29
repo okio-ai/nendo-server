@@ -62,6 +62,7 @@ def main():
     parser.add_argument("--target_id", type=str, required=True)
 
     args = parser.parse_args()
+    restrict_tf_memory()
     nd = Nendo()
     redis_conn = redis.Redis(
         host="redis",
@@ -71,8 +72,6 @@ def main():
     job = Job.fetch(args.job_id, connection=redis_conn)
     job.meta["errors"] = []
     job.save_meta()
-
-    restrict_tf_memory()
 
     target_collection = nd.library.get_collection(
         collection_id = args.target_id,
