@@ -81,8 +81,9 @@ def restrict_tf_memory():
 def free_memory(to_delete: Any):
     del to_delete
     gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 
 def get_original_title(track: NendoTrack) -> str:
@@ -357,8 +358,7 @@ def run_polymath(
 
             free_memory(nd.plugins.embed_clap.plugin_instance)
     except Exception as e:
-        if "Operation timed out" in str(e):
-            err = f"Error processing track {track.id}: Operation Timed Out"
+        err = f"Error processing track {track.id}: {e}"
         nd.logger.info(err)
         job.meta["errors"] = job.meta["errors"] + [err]
         job.save_meta()
