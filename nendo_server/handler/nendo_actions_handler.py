@@ -327,7 +327,7 @@ class NendoActionsHandler:
         target_collections = []
         skipped_tracks = []
         # apply chunking, if configured and applicable
-        if (self.server_config.chunk_actions is True and
+        if (self.server_config.chunk_actions and not run_without_target and gpu)
             run_without_target is False
             and gpu is True
         ):
