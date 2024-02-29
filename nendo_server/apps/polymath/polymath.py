@@ -97,35 +97,38 @@ def get_duration(track: NendoTrack) -> float:
 
 
 def run_polymath(
-        job: Job,
-        tracks: List[NendoTrack],
-        classify: bool,
-        stemify: bool,
-        stem_types: List[str],
-        quantize: bool,
-        quantize_to_bpm: int,
-        loopify: bool,
-        n_loops: int,
-        beats_per_loop: int,
-        embed: bool,
-        add_to_collection_id: Optional[str] = None,
+    job: Job,
+    tracks: List[NendoTrack],
+    classify: bool,
+    stemify: bool,
+    stem_types: List[str],
+    quantize: bool,
+    quantize_to_bpm: int,
+    loopify: bool,
+    n_loops: int,
+    beats_per_loop: int,
+    embed: bool,
+    add_to_collection_id: Optional[str] = None,
 ) -> List[NendoTrack]:
     """Run polymath."""
     nd = Nendo()
     signal.alarm(TIMEOUT)
-    track_num_total = len(tracks)
+    n_tracks = len(tracks)
     results: List[NendoTrack] = []
     try:
         if stemify:
             stems_map: Dict[uuid.UUID, NendoCollection] = {}
-            for track_num, track in enumerate(tracks):
+            for n, track in enumerate(tracks):
                 duration = get_duration(track)
                 original_title = get_original_title(track)
 
                 if track.track_type != "stem":
-                    job.meta["progress"] = f"Stemifying Track {track_num + 1}/{track_num_total}"
+                    job.meta["progress"] = f"Stemifying Track {n + 1}/{n_tracks}"
                     job.save_meta()
-                    stems = track.process("nendo_plugin_stemify_demucs", stem_types=stem_types)
+                    stems = track.process(
+                        "nendo_plugin_stemify_demucs",
+                        stem_types=stem_types,
+                    )
 
                     for stem in stems:
                         stem_type = stem.get_meta("stem_type")
@@ -147,18 +150,21 @@ def run_polymath(
 
         if quantize:
             quantize_map: Dict[uuid.UUID, List[NendoTrack]] = {}
-            for track_num, track in enumerate(tracks):
+            for n, track in enumerate(tracks):
                 duration = get_duration(track)
                 original_title = get_original_title(track)
 
-                job.meta["progress"] = f"Quantizing Track {track_num + 1}/{track_num_total}"
+                job.meta["progress"] = f"Quantizing Track {n + 1}/{n_tracks}"
                 job.save_meta()
                 # quantize original track
                 quantized = track.process(
                     "nendo_plugin_quantize_core",
                     bpm=quantize_to_bpm,
                 )
-                if not quantized.has_related_track(track_id=track.id, direction="from"):
+                if not quantized.has_related_track(
+                    track_id=track.id,
+                    direction="from",
+                ):
                     quantized.relate_to_track(
                         track_id=track.id,
                         relationship_type="quantized",
@@ -179,7 +185,10 @@ def run_polymath(
                     stems = stems_map[track.id]
                     for j, stem in enumerate(stems): # type: NendoTrack
                         job.meta[
-                            "progress"] = f"Quantizing Stem {j + 1}/{len(stems)} for Track {track_num + 1}/{track_num_total}"
+                            "progress"] = (
+                                f"Quantizing Stem {j + 1}/{len(stems)} "
+                                f"for Track {n + 1}/{n_tracks}"
+                            )
                         job.save_meta()
                         qt = stem.process(
                             "nendo_plugin_quantize_core",
@@ -192,7 +201,10 @@ def run_polymath(
                         else:
                             quantize_map[track.id] = [qt]
 
-                        if not qt.has_related_track(track_id=track.id, direction="from"):
+                        if not qt.has_related_track(
+                            track_id=track.id,
+                            direction="from"
+                        ):
                             qt.relate_to_track(
                                 track_id=track.id,
                                 relationship_type="quantized",
@@ -215,11 +227,11 @@ def run_polymath(
             free_memory(nd.plugins.quantize_core.plugin_instance)
 
         if loopify is True:
-            for track_num, track in enumerate(tracks):
+            for n, track in enumerate(tracks):
                 duration = get_duration(track)
                 original_title = get_original_title(track)
 
-                job.meta["progress"] = f"Loopifying Track {track_num + 1}/{track_num_total}"
+                job.meta["progress"] = f"Loopifying Track {n + 1}/{n_tracks}"
                 job.save_meta()
                 loops = track.process(
                     "nendo_plugin_loopify",
@@ -252,12 +264,18 @@ def run_polymath(
                             beats_per_loop=beats_per_loop,
                         )
                         for num_loop, lp in enumerate(qt_loops):
-                            if not lp.has_related_track(track_id=track.id, direction="from"):
+                            if not lp.has_related_track(
+                                track_id=track.id,
+                                direction="from",
+                            ):
                                 lp.relate_to_track(
                                     track_id=track.id,
                                     relationship_type="loop",
                                 )
-                            stem_type = qt.meta["stem_type"] if qt.has_meta("stem_type") else ""
+                            stem_type = (
+                                qt.meta["stem_type"] if
+                                qt.has_meta("stem_type") else ""
+                            )
                             qt_info = (
                                 f" ({quantize_to_bpm} bpm)"
                                 if qt.track_type == "quantized"
@@ -266,7 +284,10 @@ def run_polymath(
                             lp.meta = dict(track.meta)
                             lp.set_meta(
                                 {
-                                    "title": f"{original_title} - {stem_type} loop {num_loop + 1} {qt_info}",
+                                    "title": (
+                                        f"{original_title} - {stem_type} "
+                                        f"loop {num_loop + 1} {qt_info}"
+                                    ),
                                     "duration": duration,
                                 },
                             )
@@ -282,16 +303,25 @@ def run_polymath(
                             beats_per_loop=beats_per_loop,
                         )
                         for num_loop, lp in stem_loops:
-                            if not lp.has_related_track(track_id=track.id, direction="from"):
+                            if not lp.has_related_track(
+                                track_id=track.id,
+                                direction="from"
+                            ):
                                 lp.relate_to_track(
                                     track_id=track.id,
                                     relationship_type="loop",
                                 )
-                            stem_type = stem.meta["stem_type"] if stem.has_meta("stem_type") else ""
+                            stem_type = (
+                                stem.meta["stem_type"] if
+                                stem.has_meta("stem_type") else ""
+                            )
                             lp.meta = dict(track.meta)
                             lp.set_meta(
                                 {
-                                    "title": f"{original_title} - {stem_type} loop {num_loop + 1}",
+                                    "title": (
+                                        f"{original_title} - {stem_type} "
+                                        f"loop {num_loop + 1}"
+                                    ),
                                     "duration": duration,
                                 },
                             )
@@ -301,24 +331,27 @@ def run_polymath(
             free_memory(nd.plugins.loopify.plugin_instance)
 
         if classify:
-            for track_num, track in enumerate(tracks):
-                if len(track.get_plugin_data(
-                        plugin_name="nendo_plugin_classify_core")) == 0 or nd.config.replace_plugin_data:
-                    job.meta["progress"] = f"Analyzing Track {track_num + 1}/{track_num_total}"
+            for n, track in enumerate(tracks):
+                pd = track.get_plugin_data(plugin_name="nendo_plugin_classify_core")
+                if len(pd) == 0 or nd.config.replace_plugin_data:
+                    job.meta["progress"] = f"Analyzing Track {n + 1}/{n_tracks}"
                     job.save_meta()
                     track.process("nendo_plugin_classify_core")
 
             free_memory(nd.plugins.classify_core.plugin_instance)
 
         if embed:
-            track_num_total += len(results)
-            for track_num, track in enumerate(tracks):
-                job.meta["progress"] = f"Embedding Track {track_num + 1}/{track_num_total}"
+            n_tracks += len(results)
+            for n, track in enumerate(tracks):
+                job.meta["progress"] = f"Embedding Track {n + 1}/{n_tracks}"
                 job.save_meta()
                 nd.library.embed_track(track)
 
-            for track_num, track in enumerate(results):
-                job.meta["progress"] = f"Embedding Track {track_num + len(tracks) + 1}/{track_num_total}"
+            for n, track in enumerate(results):
+                job.meta["progress"] = (
+                    f"Embedding Track {n + len(tracks) + 1}"
+                    f"/{n_tracks}"
+                )
                 job.save_meta()
                 nd.library.embed_track(track)
 
