@@ -415,10 +415,11 @@ class NendoActionsHandler:
             elif isinstance(track_or_collection, NendoCollection):
                 target_collections.append(track_or_collection.id)
             elif run_without_target is False:
+                all_tracks = self.nendo_instance.library.get_tracks()
                 temp_collection = self.nendo_instance.library.add_collection(
                     name=job_id,
                     user_id=user_id,
-                    track_ids=self.nendo_instance.library.get_tracks(),
+                    track_ids=[track.id for track in all_tracks],
                     collection_type="temp",
                 )
                 target_collections.append(temp_collection.id)
