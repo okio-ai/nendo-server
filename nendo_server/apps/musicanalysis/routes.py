@@ -38,7 +38,7 @@ async def run_musicanalysis(
             container_name="",
             exec_run=False,
             replace_plugin_data=replace,
-            run_without_target=True,
+            run_without_target=False,
             max_track_duration=420.,  # 7 minutes per track
             max_chunk_duration=3600., # 60 minutes per chunk
             func_timeout=0,
