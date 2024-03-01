@@ -87,11 +87,10 @@ def main():
         else:
             print(imported_tracks[-1].id)
     except Exception as e:
-        err = f"Error processing track {track.id}: {e}"
+        err = f"Error importing track: {e}"
         nd.logger.info(err)
         job.meta["errors"] = job.meta["errors"] + [err]
         job.save_meta()
-
 
 
 if __name__ == "__main__":
