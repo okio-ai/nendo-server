@@ -74,16 +74,24 @@ def main():
 
     job.meta["progress"] = f"Importing {len(args.links)} link{'' if len(args.links) == 1 else 's'} into nendo library"
     job.save_meta()
-    imported_tracks = nd.plugins.import_core(
-        links=args.links,
-        limit=-1 if args.limit == "" else int(args.limit),
-    )
-    [finish_track(t, args.add_to_collection_id) for t in imported_tracks]
-    sys.stdout.flush()
-    if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
-        print("collection/" + args.add_to_collection_id)
-    else:
-        print(imported_tracks[-1].id)
+
+    try:
+        imported_tracks = nd.plugins.import_core(
+            links=args.links,
+            limit=-1 if args.limit == "" else int(args.limit),
+        )
+        [finish_track(t, args.add_to_collection_id) for t in imported_tracks]
+        sys.stdout.flush()
+        if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
+            print("collection/" + args.add_to_collection_id)
+        else:
+            print(imported_tracks[-1].id)
+    except Exception as e:
+        err = f"Error processing track {track.id}: {e}"
+        nd.logger.info(err)
+        job.meta["errors"] = job.meta["errors"] + [err]
+        job.save_meta()
+
 
 
 if __name__ == "__main__":
