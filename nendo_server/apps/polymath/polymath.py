@@ -3,23 +3,28 @@
 """Polymath."""
 
 import argparse
+import gc
 import os
 import signal
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
 import redis
-from nendo import Nendo, NendoResource, NendoTrack
+import tensorflow as tf
+import torch
+from nendo import Nendo, NendoResource, NendoTrack, NendoCollection
 from rq.job import Job
 
 TIMEOUT = 600
 
+
 def timeout_handler(num, stack):
     raise TimeoutError("Operation timed out")
+
 
 def finish_track(track: NendoTrack, add_to_collection_id: str):
     nd = Nendo()
@@ -57,11 +62,44 @@ def finish_track(track: NendoTrack, add_to_collection_id: str):
     track.images = [image_resource.model_dump()]
     track.save()
 
+
+def restrict_tf_memory():
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        # Restrict TensorFlow to only allocate 2GB of memory on the first GPU
+        try:
+            tf.config.set_logical_device_configuration(
+                gpus[0],
+                [tf.config.LogicalDeviceConfiguration(memory_limit=2048)])
+            logical_gpus = tf.config.list_logical_devices("GPU")
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Virtual devices must be set before GPUs have been initialized
+            print(e)
+
+
+def free_memory(to_delete: Any):
+    del to_delete
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+
+def get_original_title(track: NendoTrack) -> str:
+    if "title" in track.meta and track.meta["title"] is not None:
+        return track.meta["title"]
+    else:
+        return track.resource.meta["original_filename"]
+
+
+def get_duration(track: NendoTrack) -> float:
+    return round(librosa.get_duration(y=track.signal, sr=track.sr), 3)
+
+
 def run_polymath(
     job: Job,
-    track: NendoTrack,
-    track_num: int,
-    track_num_total: int,
+    tracks: List[NendoTrack],
     classify: bool,
     stemify: bool,
     stem_types: List[str],
@@ -72,64 +110,68 @@ def run_polymath(
     beats_per_loop: int,
     embed: bool,
     add_to_collection_id: Optional[str] = None,
-) -> None:
+) -> List[NendoTrack]:
     """Run polymath."""
     nd = Nendo()
     signal.alarm(TIMEOUT)
-    results = [track]
+    n_tracks = len(tracks)
+    results: List[NendoTrack] = []
     try:
-        nd.logger.info(f"Processing Track {track.id}")
-        duration = round(librosa.get_duration(y=track.signal, sr=track.sr), 3)
-        # workaround to assign proper titles
-        original_title = ""
-        if "title" in track.meta and track.meta["title"] is not None:
-            original_title = track.meta["title"]
-        else:
-            original_title = track.resource.meta["original_filename"]
-        if (classify is True and (
-            len(
-                track.get_plugin_data(
-                    plugin_name="nendo_plugin_classify_core",
-                ),
-            ) == 0 or nd.config.replace_plugin_data is True)):
-            job.meta["progress"] = f"Analyzing Track {track_num}/{track_num_total}"
-            job.save_meta()
-            track.process("nendo_plugin_classify_core")
-        stems = track
-        if stemify is True and track.track_type != "stem":
-            job.meta["progress"] = f"Stemifying Track {track_num}/{track_num_total}"
-            job.save_meta()
-            stems = track.process("nendo_plugin_stemify_demucs", stem_types=stem_types)
-            # workaround for setting proper title
-            for stem in stems:
-                stem_type = stem.get_meta("stem_type")
-                stem.meta = dict(track.meta)
-                stem.set_meta(
-                    {
-                        "title": f"{original_title} - {stem_type} stem",
-                        "stem_type": stem_type,
-                        "duration": duration,
-                    },
+        if stemify:
+            stems_map: Dict[uuid.UUID, NendoCollection] = {}
+            for n, track in enumerate(tracks):
+                duration = get_duration(track)
+                original_title = get_original_title(track)
+
+                if track.track_type != "stem":
+                    job.meta["progress"] = f"Stemifying Track {n + 1}/{n_tracks}"
+                    job.save_meta()
+                    stems = track.process(
+                        "nendo_plugin_stemify_demucs",
+                        stem_types=stem_types,
+                    )
+
+                    for stem in stems:
+                        stem_type = stem.get_meta("stem_type")
+                        stem.meta = dict(track.meta)
+                        stem.set_meta(
+                            {
+                                "title": f"{original_title} - {stem_type} stem",
+                                "stem_type": stem_type,
+                                "duration": duration,
+                            },
+                        )
+                        finish_track(stem, add_to_collection_id)
+                        results.append(stem)
+
+                    # remember which stems belong to which track
+                    stems_map[track.id] = stems
+
+            free_memory(nd.plugins.stemify_demucs.plugin_instance)
+
+        if quantize:
+            quantize_map: Dict[uuid.UUID, List[NendoTrack]] = {}
+            for n, track in enumerate(tracks):
+                duration = get_duration(track)
+                original_title = get_original_title(track)
+
+                job.meta["progress"] = f"Quantizing Track {n + 1}/{n_tracks}"
+                job.save_meta()
+                # quantize original track
+                quantized = track.process(
+                    "nendo_plugin_quantize_core",
+                    bpm=quantize_to_bpm,
                 )
-                finish_track(stem, add_to_collection_id)
-                results.append(stem)
-        quantized = stems
-        if quantize is True:
-            job.meta["progress"] = f"Quantizing Track {track_num}/{track_num_total}"
-            job.save_meta()
-            quantized = stems.process(
-                "nendo_plugin_quantize_core",
-                bpm=quantize_to_bpm,
-            )
-            if type(quantized) == NendoTrack:
-                if not quantized.has_related_track(track_id=track.id, direction="from"):
+                if not quantized.has_related_track(
+                    track_id=track.id,
+                    direction="from",
+                ):
                     quantized.relate_to_track(
                         track_id=track.id,
                         relationship_type="quantized",
                     )
                 # workaround for setting proper title
                 quantized.meta = dict(track.meta)
-                duration = round(librosa.get_duration(y=quantized.signal, sr=quantized.sr), 3)
                 quantized.set_meta(
                     {
                         "title": f"{original_title} - ({quantize_to_bpm} bpm)",
@@ -138,16 +180,37 @@ def run_polymath(
                 )
                 finish_track(quantized, add_to_collection_id)
                 results.append(quantized)
-            else:  # is a collection
-                for j, qt in enumerate(quantized):
-                    if not qt.has_related_track(track_id=track.id, direction="from"):
-                        qt.relate_to_track(
-                            track_id=track.id,
-                            relationship_type="quantized",
+
+                # check for stems
+                if stemify and track.id in stems_map:
+                    stems = stems_map[track.id]
+                    for j, stem in enumerate(stems): # type: NendoTrack
+                        job.meta[
+                            "progress"] = (
+                                f"Quantizing Stem {j + 1}/{len(stems)} "
+                                f"for Track {n + 1}/{n_tracks}"
+                            )
+                        job.save_meta()
+                        qt = stem.process(
+                            "nendo_plugin_quantize_core",
+                            bpm=quantize_to_bpm,
                         )
-                    qt.meta = dict(track.meta)
-                    duration = round(librosa.get_duration(y=qt.signal, sr=qt.sr), 3)
-                    if stems[j].track_type == "stem":
+
+                        # remember which quantized stems belong to which track
+                        if track.id in quantize_map:
+                            quantize_map[track.id].append(qt)
+                        else:
+                            quantize_map[track.id] = [qt]
+
+                        if not qt.has_related_track(
+                            track_id=track.id,
+                            direction="from"
+                        ):
+                            qt.relate_to_track(
+                                track_id=track.id,
+                                relationship_type="quantized",
+                            )
+                        qt.meta = dict(track.meta)
                         qt.set_meta(
                             {
                                 "title": (
@@ -159,74 +222,153 @@ def run_polymath(
                                 "duration": duration,
                             },
                         )
-                    else:
-                        qt.set_meta(
-                            {
-                                "title": f"{original_title} ({quantize_to_bpm} bpm)",
-                                "duration": duration,
-                            },
-                        )
-                    finish_track(qt, add_to_collection_id)
-                    results = results.append(qt)
-        loopified = quantized
+                        finish_track(qt, add_to_collection_id)
+                        results.append(qt)
+
+            free_memory(nd.plugins.quantize_core.plugin_instance)
+
         if loopify is True:
-            loopified = []
-            job.meta["progress"] = f"Loopifying Track {track_num}/{track_num_total}"
-            job.save_meta()
-            if type(quantized) == NendoTrack:
-                quantized = [quantized]
-            for qt in quantized:
-                qt_loops = qt.process(
+            for n, track in enumerate(tracks):
+                duration = get_duration(track)
+                original_title = get_original_title(track)
+
+                job.meta["progress"] = f"Loopifying Track {n + 1}/{n_tracks}"
+                job.save_meta()
+                loops = track.process(
                     "nendo_plugin_loopify",
                     n_loops=n_loops,
                     beats_per_loop=beats_per_loop,
                 )
-                loopified += qt_loops
-                num_loop = 1
-                for lp in qt_loops:
+                for num_loop, lp in enumerate(loops): # type: (int, NendoTrack)
                     if not lp.has_related_track(track_id=track.id, direction="from"):
                         lp.relate_to_track(
                             track_id=track.id,
                             relationship_type="loop",
                         )
-                    stem_type = qt.meta["stem_type"] if qt.has_meta("stem_type") else ""
-                    qt_info = (
-                        f" ({quantize_to_bpm} bpm)"
-                        if qt.track_type == "quantized"
-                        else ""
-                    )
                     lp.meta = dict(track.meta)
-                    duration = round(librosa.get_duration(y=lp.signal, sr=lp.sr), 3)
                     lp.set_meta(
                         {
-                            "title": f"{original_title} - {stem_type} loop {num_loop} {qt_info}",
+                            "title": f"{original_title} - loop {num_loop + 1}",
                             "duration": duration,
                         },
                     )
                     finish_track(lp, add_to_collection_id)
                     results.append(lp)
-                    num_loop += 1
-        if embed is True:
-            job.meta["progress"] = f"Embedding Track {track_num}/{track_num_total}"
-            job.save_meta()
-            if type(loopified) == NendoTrack:
-                nd.library.embed_track(loopified)
-            else:  # is a collection/list
-                for t in loopified:
-                    nd.library.embed_track(t)
+
+                if quantize and track.id in quantize_map:
+                    quantized = quantize_map.get(track.id)
+
+                    for qt in quantized:
+                        qt_loops = qt.process(
+                            "nendo_plugin_loopify",
+                            n_loops=n_loops,
+                            beats_per_loop=beats_per_loop,
+                        )
+                        for num_loop, lp in enumerate(qt_loops):
+                            if not lp.has_related_track(
+                                track_id=track.id,
+                                direction="from",
+                            ):
+                                lp.relate_to_track(
+                                    track_id=track.id,
+                                    relationship_type="loop",
+                                )
+                            stem_type = (
+                                qt.meta["stem_type"] if
+                                qt.has_meta("stem_type") else ""
+                            )
+                            qt_info = (
+                                f" ({quantize_to_bpm} bpm)"
+                                if qt.track_type == "quantized"
+                                else ""
+                            )
+                            lp.meta = dict(track.meta)
+                            lp.set_meta(
+                                {
+                                    "title": (
+                                        f"{original_title} - {stem_type} "
+                                        f"loop {num_loop + 1} {qt_info}"
+                                    ),
+                                    "duration": duration,
+                                },
+                            )
+                            finish_track(lp, add_to_collection_id)
+                            results.append(lp)
+
+                elif stemify and track.id in stems_map:
+                    stems = stems_map.get(track.id)
+                    for stem in stems:
+                        stem_loops = stem.process(
+                            "nendo_plugin_loopify",
+                            n_loops=n_loops,
+                            beats_per_loop=beats_per_loop,
+                        )
+                        for num_loop, lp in enumerate(stem_loops):
+                            if not lp.has_related_track(
+                                track_id=track.id,
+                                direction="from"
+                            ):
+                                lp.relate_to_track(
+                                    track_id=track.id,
+                                    relationship_type="loop",
+                                )
+                            stem_type = (
+                                stem.meta["stem_type"] if
+                                stem.has_meta("stem_type") else ""
+                            )
+                            lp.meta = dict(track.meta)
+                            lp.set_meta(
+                                {
+                                    "title": (
+                                        f"{original_title} - {stem_type} "
+                                        f"loop {num_loop + 1}"
+                                    ),
+                                    "duration": duration,
+                                },
+                            )
+                            finish_track(lp, add_to_collection_id)
+                            results.append(lp)
+
+            free_memory(nd.plugins.loopify.plugin_instance)
+
+        if classify:
+            for n, track in enumerate(tracks):
+                pd = track.get_plugin_data(plugin_name="nendo_plugin_classify_core")
+                if len(pd) == 0 or nd.config.replace_plugin_data:
+                    job.meta["progress"] = f"Analyzing Track {n + 1}/{n_tracks}"
+                    job.save_meta()
+                    track.process("nendo_plugin_classify_core")
+
+            free_memory(nd.plugins.classify_core.plugin_instance)
+
+        if embed:
+            n_tracks += len(results)
+            for n, track in enumerate(tracks):
+                job.meta["progress"] = f"Embedding Track {n + 1}/{n_tracks}"
+                job.save_meta()
+                nd.library.embed_track(track)
+
+            for n, track in enumerate(results):
+                job.meta["progress"] = (
+                    f"Embedding Track {n + len(tracks) + 1}"
+                    f"/{n_tracks}"
+                )
+                job.save_meta()
+                nd.library.embed_track(track)
+
+            free_memory(nd.plugins.embed_clap.plugin_instance)
     except Exception as e:
-        if "Operation timed out" in str(e):
-            err = f"Error processing track {track.id}: Operation Timed Out"
-        else:
-            err = f"Error processing track {track.id}: {e}"
+        err = f"Error processing track {track.id}: {e}"
         nd.logger.info(err)
         job.meta["errors"] = job.meta["errors"] + [err]
         job.save_meta()
+        raise
     finally:
         signal.alarm(0)
     return results
 
-if __name__ == "__main__":
+
+def main():
     parser = argparse.ArgumentParser(description="Polymath.")
     parser.add_argument("--user_id", type=str, required=True)
     parser.add_argument("--job_id", type=str, required=True)
@@ -243,6 +385,8 @@ if __name__ == "__main__":
     parser.add_argument("--add_to_collection_id", type=str, required=False)
 
     args = parser.parse_args()
+    restrict_tf_memory()
+
     nd = Nendo()
     redis_conn = redis.Redis(
         host="redis",
@@ -255,33 +399,40 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGALRM, timeout_handler)
 
-    if args.target_id is None or len(args.target_id) == 0:
-        tracks = nd.get_tracks()
-    else:
-        track_or_collection = nd.get_track_or_collection(args.target_id)
-        if type(track_or_collection) == NendoTrack:
-            tracks = [track_or_collection]
-        else:
-            tracks = track_or_collection.tracks()
-    num_tracks = len(tracks)
-    for i, track in enumerate(tracks):
-        results = run_polymath(
-            job=job,
-            track=track,
-            track_num=i+1,
-            track_num_total=num_tracks,
-            classify=args.classify,
-            stemify=args.stemify,
-            stem_types=args.stem_types,
-            quantize=args.quantize,
-            quantize_to_bpm=args.quantize_to_bpm,
-            loopify=args.loopify,
-            n_loops=args.n_loops,
-            beats_per_loop=args.beats_per_loop,
-            embed=args.embed,
-            add_to_collection_id=args.add_to_collection_id,
+    target_collection = nd.library.get_collection(
+        collection_id=args.target_id,
+        get_related_tracks=False,
+    )
+    tracks = target_collection.tracks()
+    results = run_polymath(
+        job=job,
+        tracks=tracks,
+        classify=args.classify,
+        stemify=args.stemify,
+        stem_types=args.stem_types,
+        quantize=args.quantize,
+        quantize_to_bpm=args.quantize_to_bpm,
+        loopify=args.loopify,
+        n_loops=args.n_loops,
+        beats_per_loop=args.beats_per_loop,
+        embed=args.embed,
+        add_to_collection_id=args.add_to_collection_id,
+    )
+
+    if target_collection.collection_type == "temp":
+        nd.library.remove_collection(
+            collection_id=target_collection.id,
+            user_id=args.user_id,
+            remove_relationships=True,
         )
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
         print("collection/" + args.add_to_collection_id)
     else:
-        print(results[-1].id)
+        if len(results) > 0:
+            print(results[-1].id)
+        else:
+            print("")
+
+
+if __name__ == "__main__":
+    main()

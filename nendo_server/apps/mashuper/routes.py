@@ -188,11 +188,7 @@ async def get_random_file(
 
     if len(matching_tracks) > 0:
         track = matching_tracks[0]
-
-        if "title" in track.meta and track.meta["title"] is not None:
-            track_title = track.meta["title"]
-        else:
-            track_title = track.resource.meta["original_filename"]
+        track_title = track.get_meta("title")
 
         # check if track already has the right bpm
         track_tempo = track.get_plugin_value(
@@ -211,7 +207,7 @@ async def get_random_file(
             )
             rt_tempo = int(float(rt_tempo)) if rt_tempo is not None else 0
             if rt_tempo == song_bpm:
-                return {"track_title": track_title, "track_id": str(rt.id)}
+                return {"track_title": rt.get_meta("title"), "track_id": str(rt.id)}
 
         # enqueue quantization job
         actions_handler = handler_factory.create(handler_type=HandlerType.ACTIONS)
@@ -230,6 +226,9 @@ async def get_random_file(
                 container_name="",
                 exec_run=False,
                 replace_plugin_data=False,
+                run_without_target=False,
+                max_track_duration=-1,
+                max_chunk_duration=-1,
                 func_timeout=60,
                 target_id=str(track.id),
                 target_bpm=song_bpm,
@@ -368,6 +367,9 @@ async def get_quantized(
             container_name="",
             exec_run=False,
             replace_plugin_data=False,
+            run_without_target=False,
+            max_track_duration=-1,
+            max_chunk_duration=-1,
             func_timeout=60,
             target_id=str(target_track.id),
             target_bpm=songbpm,

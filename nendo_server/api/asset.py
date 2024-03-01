@@ -35,6 +35,9 @@ ACTIONS = {
             "nendo_plugin_transcribe_whisper",
             "nendo_plugin_textgen",
         ],
+        "max_track_duration": 4500.,   # 2.5 hours per track
+        "max_chunk_duration": 36000.,  # 10 hours per chunk
+        "run_without_target": True,
     },
     "musicanalysis": {
         "name": "Music Analysis",
@@ -45,6 +48,9 @@ ACTIONS = {
             "nendo_plugin_classify_core",
             "nendo_plugin_caption_lpmusiccaps",
         ],
+        "max_track_duration": 420.,  # 7 minutes per track
+        "max_chunk_duration": 3600., # 60 minutes per chunk
+        "run_without_target": True,
     },
 }
 
@@ -67,7 +73,7 @@ async def upload_audio_post(
     try:
         temp_dir = tempfile.TemporaryDirectory()
 
-        track_ids = []
+        tracks = []
 
         async with aiofiles.open(
             os.path.join(temp_dir.name, file.filename),
@@ -128,6 +134,9 @@ async def upload_audio_post(
                 script_path=ACTIONS[run_action]["script"],
                 plugins=ACTIONS[run_action]["plugins"],
                 action_name=ACTIONS[run_action]["name"],
+                run_without_target=ACTIONS[run_action]["run_without_target"],
+                max_track_duration=ACTIONS[run_action]["max_track_duration"],
+                max_chunk_duration=ACTIONS[run_action]["max_chunk_duration"],
                 container_name="",
                 exec_run=False,
                 replace_plugin_data=False,
