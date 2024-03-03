@@ -9,11 +9,17 @@ from nendo import Nendo
 
 def quantize(
     job_id: str,
+    user_id: str,
     target_id: str,
     target_bpm: int = 120,
 ) -> None:
     nd = Nendo()
-    track = nd.get_track(target_id)
+    target_collection = nd.library.get_collection(
+        collection_id=target_id,
+        get_related_tracks=False,
+    )
+    tracks = target_collection.tracks()
+    track = tracks[0]
     q_track = track.process("nendo_plugin_quantize_core", bpm=target_bpm)
     # copy classified track info
     if track.has_meta("original_filename"):
@@ -27,6 +33,12 @@ def quantize(
                 key=pd.key,
                 value=pd.value,
             )
+    if target_collection.collection_type == "temp":
+        nd.library.remove_collection(
+            collection_id=target_collection.id,
+            user_id=user_id,
+            remove_relationships=True,
+        )
     print(q_track.id)
 
 if __name__ == "__main__":
@@ -40,6 +52,7 @@ if __name__ == "__main__":
 
     quantize(
         job_id=args.job_id,
+        user_id=args.user_id,
         target_id=args.target_id,
         target_bpm=args.target_bpm,
     )
