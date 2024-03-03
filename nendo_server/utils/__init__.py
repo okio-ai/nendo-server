@@ -2,4 +2,4 @@
 # ruff: noqa: F401
 """Utility functions used in the server."""
 
-from .utils import create_spectrogram
+from .utils import create_spectrogram, extract_search_filter

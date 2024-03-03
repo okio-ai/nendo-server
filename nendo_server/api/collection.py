@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 from handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
 from pydantic import BaseModel
 
+from utils import extract_search_filter
+
 if TYPE_CHECKING:
     from auth.auth_db import User
 
@@ -211,6 +213,106 @@ async def add_track_to_collection(
 
     return NendoHTTPResponse(data=collection, has_next=False, cursor=0)
 
+@router.put(
+    "/{collection_id}/tracks",
+    name="collection: add tracks to collection",
+    response_model=NendoHTTPResponse,
+)
+async def add_tracks_to_collection(
+    collection_id: str,
+    search_filter: Optional[str] = None,
+    track_type: Optional[str] = None,
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
+):
+    collections_handler = handler_factory.create(handler_type=HandlerType.COLLECTIONS)
+    tracks_handler = handler_factory.create(handler_type=HandlerType.TRACKS)
+
+    try:
+        search_filters = extract_search_filter(search_filter)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid search filter: {e}",
+        ) from e
+    if track_type is None or track_type == "all":
+        track_type_list = None
+    else:
+        track_type_list = track_type.split(",")
+    tracks = tracks_handler.get_tracks(
+        filters=search_filters["filters"],
+        search_meta=search_filters["search_meta"],
+        track_type=track_type_list,
+        user_id=str(user.id),
+    )
+    
+    track_ids = [str(track.id) for track in tracks]
+
+    try:
+        collection = collections_handler.add_tracks_to_collection(
+            collection_id=collection_id,
+            track_ids=track_ids,
+        )
+        delattr(collection, "nendo_instance")
+    except Exception as e:
+        collections_handler.logger.exception(f"Nendo error: {e}")
+        raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
+
+    if collection is None:
+        return JSONResponse(
+            status_code=500, content={"detail": "Error adding track to a collection"},
+        )
+
+    return NendoHTTPResponse(data=collection, has_next=False, cursor=0)
+
+@router.patch(
+    "/{collection_id}/remove/tracks",
+    name="collection: remove tracks from collection",
+    response_model=NendoHTTPResponse,
+)
+async def remove_tracks_from_collection(
+    collection_id: str,
+    search_filter: Optional[str] = None,
+    track_type: Optional[str] = None,
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
+):
+    collections_handler = handler_factory.create(handler_type=HandlerType.COLLECTIONS)
+    tracks_handler = handler_factory.create(handler_type=HandlerType.TRACKS)
+
+    try:
+        search_filters = extract_search_filter(search_filter)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid search filter: {e}",
+        ) from e
+    if track_type is None or track_type == "all":
+        track_type_list = None
+    else:
+        track_type_list = track_type.split(",")
+    tracks = tracks_handler.get_tracks(
+        filters=search_filters["filters"],
+        search_meta=search_filters["search_meta"],
+        track_type=track_type_list,
+        user_id=str(user.id),
+        collection_id=str(collection_id),
+    )
+    
+    track_ids = [str(track.id) for track in tracks]
+
+    try:
+        result = collections_handler.remove_tracks_from_collection(
+            collection_id=collection_id,
+            track_ids=track_ids,
+        )
+    except Exception as e:
+        collections_handler.logger.exception(f"Nendo error: {e}")
+        raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
+
+    return NendoHTTPResponse(data=result)
+
+
 
 @router.patch(
     "/{collection_id}/remove/{track_id}",
@@ -226,15 +328,14 @@ async def remove_track_from_collection(
     collections_handler = handler_factory.create(handler_type=HandlerType.COLLECTIONS)
 
     try:
-        success = collections_handler.remove_track_from_collection(
+        result = collections_handler.remove_track_from_collection(
             track_id=track_id, collection_id=collection_id,
         )
     except Exception as e:
         collections_handler.logger.exception(f"Nendo error: {e}")
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=success)
-
+    return NendoHTTPResponse(data=result)
 
 @router.put(
     "/{collection_id}/save",

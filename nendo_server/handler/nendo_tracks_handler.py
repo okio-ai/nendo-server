@@ -189,8 +189,8 @@ class LocalTracksHandler(NendoTracksHandler):
 
     def get_tracks(
         self,
-        offset: int = 0,
-        limit: int = 10,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
         search_meta: Optional[Dict[str, List[str]]] = None,
         collection_id: Optional[str] = None,
