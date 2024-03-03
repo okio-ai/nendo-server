@@ -221,6 +221,7 @@ async def add_track_to_collection(
 async def add_tracks_to_collection(
     collection_id: str,
     search_filter: Optional[str] = None,
+    related_collection_id: Optional[str] = None,
     track_type: Optional[str] = None,
     handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
     user: User = Depends(fastapi_users.current_user()),
@@ -243,6 +244,7 @@ async def add_tracks_to_collection(
         filters=search_filters["filters"],
         search_meta=search_filters["search_meta"],
         track_type=track_type_list,
+        collection_id=related_collection_id if len(related_collection_id) > 0 else None,
         user_id=str(user.id),
     )
     
