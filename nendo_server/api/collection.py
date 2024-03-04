@@ -240,7 +240,7 @@ async def add_tracks_to_collection(
         track_type_list = None
     else:
         track_type_list = track_type.split(",")
-    tracks = tracks_handler.get_tracks(
+    tracks, _ = tracks_handler.get_tracks(
         filters=search_filters["filters"],
         search_meta=search_filters["search_meta"],
         track_type=track_type_list,
