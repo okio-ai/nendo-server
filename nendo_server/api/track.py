@@ -146,7 +146,7 @@ async def get_tracks(
             track_type_list = track_type.split(",")
         order_by = "collection" if collection_id is not None else "updated_at"
         order = "desc"
-        tracks = tracks_handler.get_tracks(
+        tracks, num_results = tracks_handler.get_tracks(
             limit=limit,
             offset=offset,
             filters=search_filters["filters"],
@@ -169,7 +169,7 @@ async def get_tracks(
         tracks_handler.logger.exception(f"Nendo error: {e}")
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.get(
@@ -201,7 +201,7 @@ async def get_related_tracks(
             track_type_list = track_type.split(",")
         order_by = "updated_at"
         order = "desc"
-        tracks = tracks_handler.get_related_tracks(
+        tracks, num_results = tracks_handler.get_related_tracks(
             track_id=track_id,
             limit=limit,
             offset=offset,
@@ -223,7 +223,7 @@ async def get_related_tracks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.get(
@@ -255,7 +255,7 @@ async def get_similar_tracks(
             track_type_list = None
         else:
             track_type_list = track_type.split(",")
-        tracks = tracks_handler.get_similar_tracks(
+        tracks, num_results = tracks_handler.get_similar_tracks(
             track_id=track_id,
             limit=limit,
             filters=search_filters["filters"],
@@ -278,7 +278,7 @@ async def get_similar_tracks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.options("/", name="tracks:options", response_model=NendoHTTPResponse)

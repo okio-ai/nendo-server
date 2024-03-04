@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from handler.filters import TrackFilter, get_track_filters
 
@@ -198,8 +198,8 @@ class LocalTracksHandler(NendoTracksHandler):
         order_by: Optional[str] = None,
         order: Optional[str] = None,
         user_id: Optional[str] = None,
-    ) -> List[NendoTrack]:
-        return self.nendo_instance.library.filter_tracks_by_meta(
+    ) -> Tuple[List[NendoTrack], int]:
+        tracks = self.nendo_instance.library.filter_tracks_by_meta(
             search_meta=search_meta,
             filters=filters,
             collection_id=collection_id,
@@ -210,6 +210,14 @@ class LocalTracksHandler(NendoTracksHandler):
             limit=limit,
             user_id=user_id,
         )
+        num_results = self.nendo_instance.library.count_filtered_tracks_by_meta(
+            search_meta=search_meta,
+            filters=filters,
+            collection_id=collection_id,
+            track_type=track_type,
+            user_id=user_id,
+        )
+        return tracks, num_results
 
     def get_related_tracks(
         self,
@@ -222,8 +230,8 @@ class LocalTracksHandler(NendoTracksHandler):
         track_type: Optional[str] = None,
         order_by: Optional[str] = None,
         order: Optional[str] = None,
-    ) -> List[NendoTrack]:
-        return self.nendo_instance.library.filter_related_tracks_by_meta(
+    ) -> Tuple[List[NendoTrack], int]:
+        tracks = self.nendo_instance.library.filter_related_tracks_by_meta(
             track_id=track_id,
             direction="both",
             filters=filters,
@@ -235,6 +243,15 @@ class LocalTracksHandler(NendoTracksHandler):
             limit=limit,
             offset=offset,
         )
+        num_results = self.nendo_instance.library.count_filtered_related_tracks_by_meta(
+            track_id=track_id,
+            direction="both",
+            search_meta=search_meta,
+            filters=filters,
+            track_type=track_type,
+            user_id=user_id,
+        )
+        return tracks, num_results
 
     def get_similar_tracks(
         self,
@@ -246,12 +263,12 @@ class LocalTracksHandler(NendoTracksHandler):
         track_type: Optional[Union[str, List[str]]] = None,
         user_id: Optional[Union[str, uuid.UUID]] = None,
         collection_id: Optional[Union[str, uuid.UUID]] = None,
-    ) -> List[NendoTrack]:
+    ) -> Tuple[List[NendoTrack], int]:
         track = self.nendo_instance.library.get_track(
             track_id=track_id,
             user_id=user_id,
         )
-        return self.nendo_instance.library.nearest_by_track(
+        tracks = self.nendo_instance.library.nearest_by_track(
             track=track,
             limit=limit,
             offset=offset,
@@ -262,6 +279,17 @@ class LocalTracksHandler(NendoTracksHandler):
             collection_id=collection_id,
             embedding_name="nendo_plugin_embed_clap",
         )
+        num_results = self.nendo_instance.library.count_nearest_by_track(
+            track=track,
+            direction="both",
+            search_meta=search_meta,
+            filters=filters,
+            track_type=track_type,
+            user_id=user_id,
+            collection_id=collection_id,
+            embedding_name="nendo_plugin_embed_clap",
+        )
+        return tracks, num_results
 
     def create_track(
         self,
