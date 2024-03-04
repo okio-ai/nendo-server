@@ -281,7 +281,6 @@ class LocalTracksHandler(NendoTracksHandler):
         )
         num_results = self.nendo_instance.library.count_nearest_by_track(
             track=track,
-            direction="both",
             search_meta=search_meta,
             filters=filters,
             track_type=track_type,
