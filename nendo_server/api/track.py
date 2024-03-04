@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from api.response import NendoHTTPResponse
 from api.utils import APIRouter
 from auth.auth_users import fastapi_users
 from dto.core import TrackSmall
-from fastapi import Depends, HTTPException
+from fastapi import Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
 from pydantic import BaseModel
@@ -295,6 +295,41 @@ async def get_tracks_options(
     return NendoHTTPResponse(data=options, has_next=False, cursor=0)
 
 
+@router.delete(
+    "/selected",
+    name="delete: delete selected tracks",
+    response_model=NendoHTTPResponse,
+)
+async def delete_selected_tracks(
+    selected: List = Body(...),
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
+):
+    tracks_handler = handler_factory.create(handler_type=HandlerType.TRACKS)
+    assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
+    for track_id in selected:
+        filepath = assets_handler.get_audio_path(track_id)
+        track = tracks_handler.get_track(
+            track_id=track_id,
+            user_id=str(user.id)
+        )
+        result = tracks_handler.delete_track(
+            track_id=track_id,
+            user_id=str(user.id),
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Unable to delete track")
+        # also delete transcoded version
+        filepath_mp3 = f"{os.path.splitext(filepath)[0]}.mp3"
+        if os.path.isfile(filepath_mp3):
+            os.remove(filepath_mp3)
+
+        # also delete related images
+        for image in track.images:
+            os.remove(os.path.join(image.file_path, image.file_name))
+    return JSONResponse(status_code=200, content={"detail": "Tracks deleted"})
+
+
 @router.delete("/{track_id}", name="track:delete", status_code=204)
 async def delete_track(
     track_id: str,
@@ -324,7 +359,7 @@ async def delete_track(
 
 @router.delete(
     "/",
-    name="get similar tracks",
+    name="delete: bulk delete tracks",
     response_model=NendoHTTPResponse,
 )
 async def delete_tracks(
