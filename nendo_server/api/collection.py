@@ -298,7 +298,7 @@ async def add_tracks_to_collection(
     return NendoHTTPResponse(data=collection, has_next=False, cursor=0)
 
 @router.patch(
-    "/{collection_id}/remove/tracks/selected",
+    "/{collection_id}/tracks/selected",
     name="collection: remove selected tracks from collection",
     response_model=NendoHTTPResponse,
 )
