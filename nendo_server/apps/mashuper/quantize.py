@@ -3,6 +3,7 @@
 # ruff: noqa: ARG001, T201, D103
 
 import argparse
+import librosa
 
 from nendo import Nendo
 
@@ -21,9 +22,15 @@ def quantize(
     tracks = target_collection.tracks()
     track = tracks[0]
     q_track = track.process("nendo_plugin_quantize_core", bpm=target_bpm)
+    duration = round(librosa.get_duration(y=q_track.signal, sr=q_track.sr), 3)
     # copy classified track info
     if track.has_meta("original_filename"):
-        q_track.set_meta({"original_filename" : track.meta["original_filename"]})
+        q_track.set_meta(
+            {
+                "original_filename" : track.meta["original_filename"],
+                "duration": duration,
+            }
+        )
     for pd in track.get_plugin_data(plugin_name="nendo_plugin_classify_core"):
         # don't copy tempo (has been changed by quantization)
         if pd.key != "tempo":
