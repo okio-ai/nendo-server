@@ -113,13 +113,28 @@ class NendoCollectionsHandler(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def add_track_to_collection(self, collection_id: str, track_id: str) -> bool:
+    def add_track_to_collection(self, collection_id: str, track_id: str) -> NendoCollection:
         """Add a track to a collection.
 
         Args:
         ----
             collection_id (str): ID of the collection.
             track_id (str): ID of the track to add to the collection.
+
+        Returns:
+        -------
+            NendoCollection: The updated collection.
+        """
+        raise NotImplementedError
+    
+    @abstractmethod
+    def add_tracks_to_collection(self, collection_id: str, track_ids: List[str]) -> NendoCollection:
+        """Add tracks to a collection.
+
+        Args:
+        ----
+            collection_id (str): ID of the collection.
+            track_ids (List[str]): IDs of the tracks to add to the collection.
 
         Returns:
         -------
@@ -283,6 +298,15 @@ class LocalCollectionsHandler(NendoCollectionsHandler):
             collection_id=collection_id,
             track_id=track_id,
         )
+    
+    def add_tracks_to_collection(
+        self, collection_id: str, track_ids: List[str]
+    ) -> NendoCollection:
+        return self.nendo_instance.library.add_tracks_to_collection(
+            track_ids=track_ids,
+            collection_id=collection_id,
+        )
+        
 
     def save_collection_from_temp(
         self,
@@ -316,6 +340,16 @@ class LocalCollectionsHandler(NendoCollectionsHandler):
         return self.nendo_instance.library.remove_track_from_collection(
             track_id=track_id,
             collection_id=collection_id,
+        )
+        
+    def remove_tracks_from_collection(
+        self,
+        track_ids: List[str],
+        collection_id: str,
+    ) -> bool:
+        return self.nendo_instance.library.remove_tracks_from_collection(
+            collection_id=collection_id,
+            track_ids=track_ids,
         )
 
     def add_related_collection(

@@ -13,12 +13,12 @@ router = APIRouter()
 
 @router.post("")
 async def run_musicgeneration(
-        target_id: Optional[str] = Query(None),
-        replace: bool = Query(False),
-        add_to_collection_id: str = Query(""),
-        params: Dict = Body(...),
-        handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
-        user: User = Depends(fastapi_users.current_user()),
+    target_id: Optional[str] = Query(None),
+    replace: bool = Query(False),
+    add_to_collection_id: str = Query(""),
+    params: Dict = Body(...),
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
 ):
     """Generate a track with musicgeneration."""
     actions_handler = handler_factory.create(handler_type=HandlerType.ACTIONS)
