@@ -11,6 +11,7 @@ from handler.nendo_collections_handler import (
     RemoteCollectionsHandler,
 )
 from handler.nendo_tracks_handler import LocalTracksHandler, RemoteTracksHandler
+from handler.nendo_models_handler import ModelsHandler
 
 if TYPE_CHECKING:
     from nendo import Nendo
@@ -22,6 +23,7 @@ class HandlerType(Enum):
     ASSETS = "assets"
     ACTIONS = "actions"
     COLLECTIONS = "collections"
+    MODELS = "models"
 
 
 class NendoHandlerFactory(ABC):
@@ -55,6 +57,8 @@ class LocalNendoHandlerFactory(NendoHandlerFactory):
             )
         if handler_type == HandlerType.COLLECTIONS:
             return LocalCollectionsHandler(self.nendo_instance, self.logger)
+        if handler_type == HandlerType.MODELS:
+            return ModelsHandler(self.nendo_instance, self.logger)
 
         raise Exception("Unknown handler type: " + str(handler_type))
 

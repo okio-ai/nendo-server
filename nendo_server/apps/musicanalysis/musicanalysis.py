@@ -97,21 +97,21 @@ def main():
     tracks = target_collection.tracks()
 
     process_tracks_with_timeout(
-        job, TIMEOUT, "Analyzing", tracks, nd.plugins.classify_core,
-    )
-    free_memory(nd.plugins.classify_core.plugin_instance)
-
-    process_tracks_with_timeout(
         job, TIMEOUT, "Captioning", tracks, nd.plugins.caption_lpmusiccaps,
     )
     free_memory(nd.plugins.caption_lpmusiccaps.plugin_instance.model)
+
+    process_tracks_with_timeout(
+        job, TIMEOUT, "Analyzing", tracks, nd.plugins.classify_core,
+    )
+    free_memory(nd.plugins.classify_core.plugin_instance)
 
     process_tracks_with_timeout(
         job, TIMEOUT, "Embedding", tracks, nd.library.embed_track,
     )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
-    if (target_collection.collection_type == "temp"):
+    if target_collection.collection_type == "temp":
         nd.library.remove_collection(
             collection_id=target_collection.id,
             user_id=args.user_id,
