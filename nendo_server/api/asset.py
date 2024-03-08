@@ -381,7 +381,7 @@ async def serve_image_asset(
     # if config.get_settings().environment == Environment.LOCAL:
     filepath = assets_handler.get_image_path(image_file_name)
     if filepath is None:
-        raise HTTPException(status_code=404, detail="Track not found")
+        raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(
         filepath,
