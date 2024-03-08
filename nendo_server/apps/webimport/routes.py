@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.post("")
-async def run_musicgeneration(
+async def run_web_import(
     target_id: Optional[str] = Query(None),
     replace: bool = Query(False),
     add_to_collection_id: str = Query(""),
@@ -20,7 +20,7 @@ async def run_musicgeneration(
     handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
     user: User = Depends(fastapi_users.current_user()),
 ):
-    """Generate a track with musicgeneration."""
+    """Generate a voice with the voice generation plugin."""
     actions_handler = handler_factory.create(handler_type=HandlerType.ACTIONS)
 
     assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
@@ -30,32 +30,24 @@ async def run_musicgeneration(
     try:
         action_id = actions_handler.create_docker_action(
             user_id=str(user.id),
-            image="nendo/musicgen",
-            gpu=True,
-            script_path="musicgen/musicgen.py",
+            image="nendo/webimport",
+            gpu=False,
+            script_path="webimport/webimport.py",
             plugins=[
-                "nendo_plugin_musicgen",
+                "nendo_plugin_import_core",
             ],
-            action_name="Music Generation",
+            action_name="Web Import",
             container_name="",
             exec_run=False,
-            replace_plugin_data=replace,
             run_without_target=True,
             max_track_duration=-1.,
             max_chunk_duration=-1.,
+            replace_plugin_data=replace,
             func_timeout=0,
             target_id=target_id,
-            prompt=params["musicgen"]["prompt"],
-            temperature=float(params["musicgen"]["temperature"]),
-            cfg_coef=float(params["musicgen"]["cfg"]),
+            links=params["webimport"]["links"],
+            limit=params["webimport"]["limit"],
             add_to_collection_id=add_to_collection_id,
-            # n_samples=params["n_samples"],
-            # bpm=int(params["bpm"]),
-            # key=params["key"],
-            # scale=params["scale"],
-            # model=params["model"],
-            # duration=params["duration"],
-            # seed=params["seed"],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e

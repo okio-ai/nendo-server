@@ -5,13 +5,17 @@ import os
 import uuid
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import List
+import re
+import sys
+from typing import List, Optional
+from urllib.parse import unquote
 
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
 from nendo import Nendo, NendoResource
+from pydantic import BaseModel, parse_obj_as
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy_json import NestedMutableDict, NestedMutableList
@@ -98,3 +102,59 @@ def create_spectrogram(
         f"Successfully rendered {rendered_spectrograms}/{len(track_ids)} "
         "spectrograms"
     )
+
+class TrackSearchFilterParams(BaseModel):
+    """Filter parameters object."""
+
+    search: str = ""
+    filters: List = []
+
+
+def extract_search_filter(searchfilter: Optional[str] = None):
+    search_params = TrackSearchFilterParams()
+    # URL decode the JSON parameter
+    if searchfilter is not None and searchfilter != "":
+        decoded_search_filter = unquote(searchfilter)
+        if decoded_search_filter is not None:
+            search_params = parse_obj_as(
+                TrackSearchFilterParams,
+                json.loads(decoded_search_filter),
+            )
+
+    matched = re.findall(r'(?:"([^"]*)")|(\S+)', search_params.search)
+    search_list = [x[0] if x[0] else x[1] for x in matched]
+    search_meta = {"": search_list}
+    filters = {}
+    for f in search_params.filters:
+        if f["search"] == "metadata":
+            matched = re.findall(r'(?:"([^"]*)")|(\S+)', f["value"])
+            search_list = [x[0] if x[0] else x[1] for x in matched]
+            search_meta.update({f["key"]: search_list})
+        elif f["type"] == "range":
+            value_min = (
+                float(f["value_min"]) if
+                f["value_min"] is not None else
+                sys.float_info.min
+            )
+            value_max = (
+                float(f["value_max"]) if
+                f["value_max"] is not None else
+                sys.float_info.max
+            )
+            filter_value = (value_min, value_max)
+            filters.update({f["key"]: filter_value})
+        elif f["type"] == "key":
+            filters.update({
+                "key": f["value_key"],
+                "scale": f["value_scale"],
+            })
+        elif f["type"] == "multiselect":
+            for value in f["values"]:
+                filters.update({f["key"]: value})
+        else:
+            filter_value = f["value"]
+            filters.update({f["key"]: filter_value})
+    return {
+        "search_meta": search_meta,
+        "filters": filters,
+    }

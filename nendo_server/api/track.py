@@ -2,23 +2,21 @@
 """Nendo API Server track routes."""
 from __future__ import annotations
 
-import json
 import os
-import re
-import sys
 from typing import TYPE_CHECKING, List, Optional
-from urllib.parse import unquote
 
 from api.response import NendoHTTPResponse
 from api.utils import APIRouter
 from auth.auth_users import fastapi_users
 from dto.core import TrackSmall
-from fastapi import Depends, HTTPException
+from fastapi import Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
-from pydantic import BaseModel, parse_obj_as
+from pydantic import BaseModel
 
 from nendo import NendoLibraryError
+
+from utils import extract_search_filter
 
 if TYPE_CHECKING:
     from auth.auth_db import User
@@ -40,62 +38,6 @@ class TrackObj(BaseModel):
     meta: dict = {}
     resource: dict = {}
     images: list = []
-
-class TrackSearchFilterParams(BaseModel):
-    """Filter parameters object."""
-
-    search: str = ""
-    filters: List = []
-
-
-def extract_search_filter(searchfilter: Optional[str] = None):
-    search_params = TrackSearchFilterParams()
-    # URL decode the JSON parameter
-    if searchfilter is not None and searchfilter != "":
-        decoded_search_filter = unquote(searchfilter)
-        if decoded_search_filter is not None:
-            search_params = parse_obj_as(
-                TrackSearchFilterParams,
-                json.loads(decoded_search_filter),
-            )
-
-    matched = re.findall(r'(?:"([^"]*)")|(\S+)', search_params.search)
-    search_list = [x[0] if x[0] else x[1] for x in matched]
-    search_meta = {"": search_list}
-    filters = {}
-    for f in search_params.filters:
-        if f["search"] == "metadata":
-            matched = re.findall(r'(?:"([^"]*)")|(\S+)', f["value"])
-            search_list = [x[0] if x[0] else x[1] for x in matched]
-            search_meta.update({f["key"]: search_list})
-        elif f["type"] == "range":
-            value_min = (
-                float(f["value_min"]) if
-                f["value_min"] is not None else
-                sys.float_info.min
-            )
-            value_max = (
-                float(f["value_max"]) if
-                f["value_max"] is not None else
-                sys.float_info.max
-            )
-            filter_value = (value_min, value_max)
-            filters.update({f["key"]: filter_value})
-        elif f["type"] == "key":
-            filters.update({
-                "key": f["value_key"],
-                "scale": f["value_scale"],
-            })
-        elif f["type"] == "multiselect":
-            for value in f["values"]:
-                filters.update({f["key"]: value})
-        else:
-            filter_value = f["value"]
-            filters.update({f["key"]: filter_value})
-    return {
-        "search_meta": search_meta,
-        "filters": filters,
-    }
 
 
 @router.post("/", name="track:create", response_model=NendoHTTPResponse)
@@ -204,7 +146,7 @@ async def get_tracks(
             track_type_list = track_type.split(",")
         order_by = "collection" if collection_id is not None else "updated_at"
         order = "desc"
-        tracks = tracks_handler.get_tracks(
+        tracks, num_results = tracks_handler.get_tracks(
             limit=limit,
             offset=offset,
             filters=search_filters["filters"],
@@ -227,7 +169,7 @@ async def get_tracks(
         tracks_handler.logger.exception(f"Nendo error: {e}")
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.get(
@@ -259,7 +201,7 @@ async def get_related_tracks(
             track_type_list = track_type.split(",")
         order_by = "updated_at"
         order = "desc"
-        tracks = tracks_handler.get_related_tracks(
+        tracks, num_results = tracks_handler.get_related_tracks(
             track_id=track_id,
             limit=limit,
             offset=offset,
@@ -281,7 +223,7 @@ async def get_related_tracks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.get(
@@ -313,7 +255,7 @@ async def get_similar_tracks(
             track_type_list = None
         else:
             track_type_list = track_type.split(",")
-        tracks = tracks_handler.get_similar_tracks(
+        tracks, num_results = tracks_handler.get_similar_tracks(
             track_id=track_id,
             limit=limit,
             filters=search_filters["filters"],
@@ -329,7 +271,6 @@ async def get_similar_tracks(
                 if isinstance(pd.value, str) and len(pd.value) > 2000:
                     track.plugin_data[i].value = track.plugin_data[i].value[:2000] + " [...]"
 
-        # currently no paging
         has_next = len(tracks) == limit
         next_cursor = cursor + 1 if has_next else cursor
     except NendoLibraryError as e:
@@ -337,7 +278,7 @@ async def get_similar_tracks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
 
-    return NendoHTTPResponse(data=tracks, has_next=has_next, cursor=next_cursor)
+    return NendoHTTPResponse(data={"tracks": tracks, "num_results": num_results}, has_next=has_next, cursor=next_cursor)
 
 
 @router.options("/", name="tracks:options", response_model=NendoHTTPResponse)
@@ -352,6 +293,41 @@ async def get_tracks_options(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
     return NendoHTTPResponse(data=options, has_next=False, cursor=0)
+
+
+@router.delete(
+    "/selected",
+    name="delete: delete selected tracks",
+    response_model=NendoHTTPResponse,
+)
+async def delete_selected_tracks(
+    selected: List = Body(...),
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
+):
+    tracks_handler = handler_factory.create(handler_type=HandlerType.TRACKS)
+    assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
+    for track_id in selected:
+        filepath = assets_handler.get_audio_path(track_id)
+        track = tracks_handler.get_track(
+            track_id=track_id,
+            user_id=str(user.id)
+        )
+        result = tracks_handler.delete_track(
+            track_id=track_id,
+            user_id=str(user.id),
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Unable to delete track")
+        # also delete transcoded version
+        filepath_mp3 = f"{os.path.splitext(filepath)[0]}.mp3"
+        if os.path.isfile(filepath_mp3):
+            os.remove(filepath_mp3)
+
+        # also delete related images
+        for image in track.images:
+            os.remove(os.path.join(image.file_path, image.file_name))
+    return JSONResponse(status_code=200, content={"detail": "Tracks deleted"})
 
 
 @router.delete("/{track_id}", name="track:delete", status_code=204)
@@ -380,3 +356,57 @@ async def delete_track(
     if not result:
         raise HTTPException(status_code=404, detail="Unable to delete track")
     return JSONResponse(status_code=200, content={"detail": "Track deleted"})
+
+@router.delete(
+    "/",
+    name="delete: bulk delete tracks",
+    response_model=NendoHTTPResponse,
+)
+async def delete_tracks(
+    search_filter: Optional[str] = None,
+    collection_id: Optional[str] = None,
+    track_type: Optional[str] = None,
+    handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
+    user: User = Depends(fastapi_users.current_user()),
+):
+    tracks_handler = handler_factory.create(handler_type=HandlerType.TRACKS)
+    assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
+    try:
+        search_filters = extract_search_filter(search_filter)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid search filter: {e}",
+        ) from e
+    if track_type is None or track_type == "all":
+        track_type_list = None
+    else:
+        track_type_list = track_type.split(",")
+    tracks, _ = tracks_handler.get_tracks(
+        filters=search_filters["filters"],
+        search_meta=search_filters["search_meta"],
+        collection_id=collection_id,
+        track_type=track_type_list,
+        user_id=str(user.id),
+    )
+    for track in tracks:
+        filepath = assets_handler.get_audio_path(str(track.id))
+        track = tracks_handler.get_track(
+            track_id=str(track.id),
+            user_id=str(user.id)
+        )
+        result = tracks_handler.delete_track(
+            track_id=str(track.id),
+            user_id=str(user.id),
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Unable to delete track")
+        # also delete transcoded version
+        filepath_mp3 = f"{os.path.splitext(filepath)[0]}.mp3"
+        if os.path.isfile(filepath_mp3):
+            os.remove(filepath_mp3)
+
+        # also delete related images
+        for image in track.images:
+            os.remove(os.path.join(image.file_path, image.file_name))
+    return JSONResponse(status_code=200, content={"detail": "Tracks deleted"})

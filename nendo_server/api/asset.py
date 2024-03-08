@@ -81,6 +81,7 @@ async def upload_audio_post(
         ) as out_file:
             while content := await file.read(1024):
                 await out_file.write(content)
+            await out_file.flush()
             request.app.state.logger.info(f"Done writing tempfile: {out_file.name}")
 
             tracks = assets_handler.add_to_library(
