@@ -91,7 +91,7 @@ def get_duration(track: NendoTrack) -> float:
     return round(librosa.get_duration(y=track.signal, sr=track.sr), 3)
 
 
-@timeout(600)
+@timeout(int(os.getenv("TRACK_PROCESSING_TIMEOUT")))
 def process_track(
         job: Job,
         progress_info: str,

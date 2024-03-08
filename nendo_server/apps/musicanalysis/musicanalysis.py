@@ -3,6 +3,7 @@
 # ruff: noqa: BLE001, I001, T201
 import argparse
 import gc
+import os
 from typing import Any, Callable
 
 import redis
@@ -28,8 +29,7 @@ def restrict_tf_memory():
             # Virtual devices must be set before GPUs have been initialized
             print(e)
 
-
-@timeout(600)
+@timeout(int(os.getenv("TRACK_PROCESSING_TIMEOUT")))
 def process_track(
         job: Job,
         progress_info: str,

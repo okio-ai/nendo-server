@@ -41,7 +41,8 @@ async def run_voiceanalysis(
             run_without_target=False,
             max_track_duration=4500.,   # 2.5 hours per track
             max_chunk_duration=36000.,  # 10 hours per chunk
-            func_timeout=0,
+            action_timeout=None,
+            track_processing_timeout=None,
             target_id=target_id,
         )
     except Exception as e:

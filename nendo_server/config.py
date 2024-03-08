@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     num_gpu_workers: int = Field(default=1)
     user_storage_size: int = Field(default=-1)
     chunk_actions: bool = Field(default=False)
+    default_action_timeout: int = Field(default=-1)
+    default_track_processing_timeout: int = Field(default=600)
 
     """
     Google OAuth integration

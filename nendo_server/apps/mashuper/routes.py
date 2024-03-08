@@ -229,7 +229,8 @@ async def get_random_file(
                 run_without_target=False,
                 max_track_duration=-1,
                 max_chunk_duration=-1,
-                func_timeout=60,
+                action_timeout=120,
+                track_processing_timeout=None,
                 target_id=str(track.id),
                 target_bpm=song_bpm,
             )
@@ -370,7 +371,8 @@ async def get_quantized(
             run_without_target=False,
             max_track_duration=-1,
             max_chunk_duration=-1,
-            func_timeout=60,
+            action_timeout=120,
+            track_processing_timeout=None,
             target_id=str(target_track.id),
             target_bpm=songbpm,
         )

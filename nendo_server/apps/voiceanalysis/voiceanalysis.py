@@ -3,6 +3,7 @@
 """Voice Analysis app."""
 import argparse
 import gc
+import os
 import re
 from typing import Any, Callable
 
@@ -13,7 +14,7 @@ from rq.job import Job
 from wrapt_timeout_decorator import timeout
 
 
-@timeout(600)
+@timeout(int(os.getenv("TRACK_PROCESSING_TIMEOUT")))
 def process_track(
         job: Job,
         progress_info: str,
