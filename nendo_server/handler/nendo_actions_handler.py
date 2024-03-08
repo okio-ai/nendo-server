@@ -127,7 +127,7 @@ def dockerized_func(
             "bind": "/home/nendo/run.py",
             "mode": "ro",
         },
-        "hf-models-cache": {
+        "nendo-platform_models-cache": {
             "bind": "/home/nendo/.cache/",
             "mode": "rw",
         },
