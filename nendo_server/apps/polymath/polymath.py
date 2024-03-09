@@ -99,14 +99,9 @@ def process_track(
         func: Callable,
         **kwargs: Any,
 ):
-    try:
-        job.meta["progress"] = progress_info
-        job.save_meta()
-        return func(track=track, **kwargs)
-    except Exception as e:
-        err = f"Error processing track {track.id}: {e}"
-        job.meta["errors"] = job.meta["errors"] + [err]
-        job.save_meta()
+    job.meta["progress"] = progress_info
+    job.save_meta()
+    return func(track=track, **kwargs)
 
 
 def run_polymath(
@@ -127,10 +122,10 @@ def run_polymath(
     nd = Nendo()
     n_tracks = len(tracks)
     results: List[NendoTrack] = []
-    try:
-        if stemify:
-            stems_map: Dict[uuid.UUID, NendoCollection] = {}
-            for n, track in enumerate(tracks):
+    if stemify:
+        stems_map: Dict[uuid.UUID, NendoCollection] = {}
+        for n, track in enumerate(tracks):
+            try:
                 duration = get_duration(track)
                 original_title = get_original_title(track)
 
@@ -157,12 +152,17 @@ def run_polymath(
 
                     # remember which stems belong to which track
                     stems_map[track.id] = stems
+            except Exception as e:
+                err = f"Error stemifying track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            free_memory(nd.plugins.stemify_demucs.plugin_instance)
+        free_memory(nd.plugins.stemify_demucs.plugin_instance)
 
-        if quantize:
-            quantize_map: Dict[uuid.UUID, List[NendoTrack]] = {}
-            for n, track in enumerate(tracks):
+    if quantize:
+        quantize_map: Dict[uuid.UUID, List[NendoTrack]] = {}
+        for n, track in enumerate(tracks):
+            try:
                 duration = get_duration(track)
                 original_title = get_original_title(track)
                 quantized = process_track(
@@ -233,11 +233,16 @@ def run_polymath(
                         )
                         finish_track(qt, add_to_collection_id)
                         results.append(qt)
+            except Exception as e:
+                err = f"Error quantizing track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            free_memory(nd.plugins.quantize_core.plugin_instance)
+        free_memory(nd.plugins.quantize_core.plugin_instance)
 
-        if loopify is True:
-            for n, track in enumerate(tracks):
+    if loopify is True:
+        for n, track in enumerate(tracks):
+            try:
                 duration = get_duration(track)
                 original_title = get_original_title(track)
 
@@ -344,11 +349,16 @@ def run_polymath(
                             )
                             finish_track(lp, add_to_collection_id)
                             results.append(lp)
+            except Exception as e:
+                err = f"Error loopifying track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            free_memory(nd.plugins.loopify.plugin_instance)
+        free_memory(nd.plugins.loopify.plugin_instance)
 
-        if classify:
-            for n, track in enumerate(tracks):
+    if classify:
+        for n, track in enumerate(tracks):
+            try:
                 pd = track.get_plugin_data(plugin_name="nendo_plugin_classify_core")
                 if len(pd) == 0 or nd.config.replace_plugin_data:
                     process_track(
@@ -357,20 +367,30 @@ def run_polymath(
                         track,
                         nd.plugins.classify_core,
                     )
+            except Exception as e:
+                err = f"Error analyzing track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            free_memory(nd.plugins.classify_core.plugin_instance)
+        free_memory(nd.plugins.classify_core.plugin_instance)
 
-        if embed:
-            n_tracks += len(results)
-            for n, track in enumerate(tracks):
+    if embed:
+        n_tracks += len(results)
+        for n, track in enumerate(tracks):
+            try:
                 process_track(
                     job,
                     f"Embedding Track {n + 1}/{n_tracks}",
                     track,
                     nd.library.embed_track,
                 )
+            except Exception as e:
+                err = f"Error embedding track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            for n, track in enumerate(results):
+        for n, track in enumerate(results):
+            try:
                 process_track(
                     job,
                     (
@@ -380,12 +400,12 @@ def run_polymath(
                     track,
                     nd.library.embed_track,
                 )
+            except Exception as e:
+                err = f"Error embedding track {track.id}: {e}"
+                job.meta["errors"] = job.meta["errors"] + [err]
+                job.save_meta()
 
-            free_memory(nd.plugins.embed_clap.plugin_instance)
-    except Exception as e:
-        err = f"Error running polymath: {e}"
-        job.meta["errors"] = job.meta["errors"] + [err]
-        job.save_meta()
+        free_memory(nd.plugins.embed_clap.plugin_instance)
     return results
 
 
@@ -447,7 +467,7 @@ def main():
     if args.add_to_collection_id is not None and len(args.add_to_collection_id) > 0:
         print("collection/" + args.add_to_collection_id)
     else:
-        if len(results) > 0:
+        if results is not None and len(results) > 0:
             print(results[-1].id)
         else:
             print("")

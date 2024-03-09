@@ -54,7 +54,7 @@ async def run_polymath(
             max_chunk_duration=1800., # 30 minutes per chunk
             env={"PYTORCH_NO_CUDA_MEMORY_CACHING": 1},
             action_timeout=None,
-            track_processing_timeout=None,
+            track_processing_timeout=300,
             target_id=target_id,
             classify=params["classify"]["isActive"],
             stemify=params["stemify"]["isActive"],

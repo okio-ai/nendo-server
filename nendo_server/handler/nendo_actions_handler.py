@@ -335,19 +335,23 @@ class NendoActionsHandler:
         container_name = container_name if exec_run is True else job_id
         
         target_id = kwargs.get("target_id", "")
-        track_or_collection = self.nendo_instance.get_track_or_collection(
+        target_obj = self.nendo_instance.get_track_or_collection(
             target_id,
         )
         target = {}
-        if track_or_collection is not None:
+        if target_obj is not None:
             target.update({
                 "target_type": (
-                    "track" if isinstance(track_or_collection, NendoTrack) else
+                    "track" if isinstance(target_obj, NendoTrack) else
                     "collection",
                 )
             })
             target.update({
                 "target_id": target_id,
+                "target_title": (
+                    target_obj.meta['title'] if isinstance(target_obj, NendoTrack) else
+                    target_obj.name
+                ),
             })
         target_collections = []
         skipped_tracks = []
@@ -358,19 +362,19 @@ class NendoActionsHandler:
         ):
             track_ids = []
             # create a single chunk with the track in it
-            if isinstance(track_or_collection, NendoTrack):
+            if isinstance(target_obj, NendoTrack):
                 # get track duration
-                duration = track_or_collection.get_meta("duration")
+                duration = target_obj.get_meta("duration")
                 if duration is None:
                     duration = round(librosa.get_duration(
-                        y=track_or_collection.signal,
-                        sr=track_or_collection.sr
+                        y=target_obj.signal,
+                        sr=target_obj.sr
                     ), 1)
                 # skip track if duration exceeds maximum
                 if max_track_duration > 0. and duration > max_track_duration:
-                    skipped_tracks.append(track_or_collection.get_meta("title"))
+                    skipped_tracks.append(target_obj.get_meta("title"))
                 else:
-                    track_ids.append(track_or_collection.id)
+                    track_ids.append(target_obj.id)
                 chunk_collection = self.nendo_instance.add_collection(
                     name=job_id,
                     user_id=user_id,
@@ -380,8 +384,8 @@ class NendoActionsHandler:
                 target_collections.append(chunk_collection.id)
             else:
                 # split collection into chunks
-                if isinstance(track_or_collection, NendoCollection):
-                    tracks = track_or_collection.tracks()
+                if isinstance(target_obj, NendoCollection):
+                    tracks = target_obj.tracks()
                 # split the library into chunks
                 else:
                     tracks = self.nendo_instance.library.get_tracks(
@@ -429,16 +433,16 @@ class NendoActionsHandler:
                             target_collections.append(chunk_collection.id)
                             chunk_duration = 0.
         else:
-            if isinstance(track_or_collection, NendoTrack):
+            if isinstance(target_obj, NendoTrack):
                 temp_collection = self.nendo_instance.library.add_collection(
                     name=job_id,
                     user_id=user_id,
-                    track_ids=[track_or_collection.id],
+                    track_ids=[target_obj.id],
                     collection_type="temp",
                 )
                 target_collections.append(temp_collection.id)
-            elif isinstance(track_or_collection, NendoCollection):
-                target_collections.append(track_or_collection.id)
+            elif isinstance(target_obj, NendoCollection):
+                target_collections.append(target_obj.id)
             elif run_without_target is False:
                 all_tracks = self.nendo_instance.library.get_tracks(user_id=user_id)
                 temp_collection = self.nendo_instance.library.add_collection(
