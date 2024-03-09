@@ -41,7 +41,8 @@ async def run_musicanalysis(
             run_without_target=False,
             max_track_duration=420.,  # 7 minutes per track
             max_chunk_duration=3600., # 60 minutes per chunk
-            func_timeout=0,
+            action_timeout=None,
+            track_processing_timeout=None,
             target_id=target_id,
         )
     except Exception as e:

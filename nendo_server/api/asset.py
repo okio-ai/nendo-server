@@ -141,7 +141,8 @@ async def upload_audio_post(
                 container_name="",
                 exec_run=False,
                 replace_plugin_data=False,
-                func_timeout=0,
+                action_timeout=None,
+                track_processing_timeout=60,
                 target_id=track.id,
             )
         return_dict.update({"action_id": action_id})
@@ -381,7 +382,7 @@ async def serve_image_asset(
     # if config.get_settings().environment == Environment.LOCAL:
     filepath = assets_handler.get_image_path(image_file_name)
     if filepath is None:
-        raise HTTPException(status_code=404, detail="Track not found")
+        raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(
         filepath,
