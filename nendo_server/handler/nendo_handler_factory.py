@@ -82,5 +82,7 @@ class RemoteNendoHandlerFactory(NendoHandlerFactory):
             )
         if handler_type == HandlerType.COLLECTIONS:
             return RemoteCollectionsHandler(self.nendo_instance, self.logger)
+        if handler_type == HandlerType.MODELS:
+            return ModelsHandler(self.nendo_instance, self.logger)
 
         raise Exception("Unknown handler type: " + str(handler_type))

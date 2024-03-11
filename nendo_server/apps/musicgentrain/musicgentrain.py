@@ -1,17 +1,36 @@
 # -*- encoding: utf-8 -*-
 """Musicgeneration app."""
-# ruff: noqa: BLE001, T201, I001
-import signal
 import argparse
 import gc
+import os
+# ruff: noqa: BLE001, T201, I001
+import shutil
 from pathlib import Path
-from typing import Any, List, Callable
+from typing import Any, Callable, List
 
 import redis
 import torch
 from nendo import Nendo
 from nendo import NendoTrack
 from rq.job import Job
+from wrapt_timeout_decorator import timeout
+
+
+def restrict_tf_memory():
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    import tensorflow as tf
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        # Restrict TensorFlow to only allocate 1GB of memory on the first GPU
+        try:
+            tf.config.set_logical_device_configuration(
+                gpus[0],
+                [tf.config.LogicalDeviceConfiguration(memory_limit=1024)])
+            logical_gpus = tf.config.list_logical_devices("GPU")
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Virtual devices must be set before GPUs have been initialized
+            print(e)
 
 
 def free_memory(to_delete: Any):
@@ -21,31 +40,35 @@ def free_memory(to_delete: Any):
     torch.cuda.ipc_collect()
 
 
-def process_tracks_with_timeout(
+@timeout(int(os.getenv("TRACK_PROCESSING_TIMEOUT")))
+def process_track(
         job: Job,
-        timeout: int,
         progress_info: str,
-        tracks: List[NendoTrack],
+        track: NendoTrack,
         func: Callable,
         **kwargs: Any,
 ):
-    for i, track in enumerate(tracks):
-        signal.alarm(timeout)
-        try:
-            job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
-            job.save_meta()
-            func(track=track, **kwargs)
-        except Exception as e:
-            if "Operation timed out" in str(e):
-                err = f"Error processing track {track.id}: Operation Timed Out"
-            else:
-                err = f"Error processing track {track.id}: {e}"
-            # nd.logger.info(err)
-            job.meta["errors"] = job.meta["errors"] + [err]
-            job.save_meta()
-            return
-        finally:
-            signal.alarm(0)
+    try:
+        job.meta["progress"] = progress_info
+        job.save_meta()
+        func(track=track, **kwargs)
+    except Exception as e:
+        err = f"Error processing track {track.id}: {e}"
+        job.meta["errors"] = job.meta["errors"] + [err]
+        job.save_meta()
+
+
+def split_vocal(track: NendoTrack, nd: Nendo, result_list: List[NendoTrack]):
+    stems = nd.plugins.stemify_demucs(track=track, stem_types=["vocals", "no_vocals"])
+    vocals, no_vocals = stems[0], stems[1]
+
+    # remove unused track
+    nd.library.remove_track(vocals.id, remove_relationships=True)
+
+    # override meta for new track
+    no_vocals.meta = dict(track.meta)
+    result_list.append(no_vocals)
+    return no_vocals
 
 
 def main():
@@ -58,8 +81,13 @@ def main():
     # Musicgen specific arguments
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--remove_vocals", action="store_true", default=False)
+    parser.add_argument("--batch_size", type=int, required=True)
+    parser.add_argument("--epochs", type=int, required=True)
+    parser.add_argument("--lr", type=float, required=True)
 
     args = parser.parse_args()
+    restrict_tf_memory()
     nd = Nendo()
     redis_conn = redis.Redis(
         host="redis",
@@ -80,59 +108,78 @@ def main():
     job.save_meta()
 
     train_collection_list = []
+    train_collection = None
+    try:
 
-    for i, track in enumerate(tracks):
-        job.meta["progress"] = f"Removing vocals for Track {i + 1}/{len(tracks)}"
+        if args.remove_vocals:
+            for i, track in enumerate(tracks):
+                process_track(
+                    job,
+                    f"Removing vocals for Track {i + 1}/{len(tracks)}",
+                    track,
+                    split_vocal,
+                    nd=nd,
+                    result_list=train_collection_list,
+                )
+        else:
+            train_collection_list = tracks
+
+        free_memory(nd.plugins.stemify_demucs.plugin_instance)
+
+        for i, track in enumerate(train_collection_list):
+            process_track(
+                job,
+                f"Analyzing Track {i + 1}/{len(tracks)}",
+                track,
+                nd.plugins.classify_core,
+            )
+        free_memory(nd.plugins.classify_core.plugin_instance)
+
+        train_collection = nd.library.add_collection(
+            name="Musicgen Training",
+            user_id=args.user_id,
+            track_ids=[track.id for track in train_collection_list],
+            collection_type="temp",
+        )
+
+        job.meta["progress"] = f"Started Musicgen training, this might take a while..."
         job.save_meta()
-        stems = nd.plugins.stemify_demucs(track=track, stem_types=["vocals", "no_vocals"])
-        vocals, no_vocals = stems[0], stems[1]
 
-        # remove unused track
-        nd.library.remove_track(vocals.id, remove_relationships=True)
-        train_collection_list.append(no_vocals)
+        output_dir = Path.home() / ".cache" / "nendo" / "models" / "musicgen" / str(
+            args.user_id) / target_collection.name.replace(" ", "_")
 
-    free_memory(nd.plugins.stemify_demucs.plugin_instance)
-    process_tracks_with_timeout(
-        job, 600, "Analyzing", tracks, nd.plugins.classify_core,
-    )
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
 
-    train_collection = nd.library.add_collection(
-        name="Musicgen Training",
-        user_id=args.user_id,
-        track_ids=[track.id for track in train_collection_list],
-        collection_type="temp",
-        batch_size=1,
-        lr=0.5,
-        epochs=3,
-    )
+        os.makedirs(output_dir, exist_ok=True)
+        nd.plugins.musicgen.train(
+            collection=train_collection,
+            output_dir=output_dir.absolute().as_posix(),
+            model=args.model,
+            prompt=args.prompt,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            epochs=args.epochs,
+            finetune=True
+        )
 
-    job.meta["progress"] = f"Started Musicgen training..."
-    job.save_meta()
+        target_collection.set_meta({
+            "musicgen_model": str(output_dir),
+            "musicgen_prompt": args.prompt,
+            "musicgen_model_type": args.model,
+        })
+    finally:
+        # cleanup
+        if train_collection is not None:
+            nd.library.remove_collection(
+                collection_id=train_collection.id,
+                user_id=args.user_id,
+                remove_relationships=True,
+            )
+        if args.remove_vocals:
+            [nd.library.remove_track(track.id, remove_relationships=True) for track in train_collection_list]
 
-    output_dir = Path.home() / ".cache" / "nendo" / "models" / "musicgen" / str(args.user_id) / target_collection.name
-    nd.plugins.musicgen.train(
-        collection=train_collection,
-        output_dir=output_dir,
-        model=args.model,
-        prompt=args.prompt,
-        finetune=True
-    )
-
-    target_collection.set_meta({
-        "musicgen_model": str(output_dir),
-        "musicgen_prompt": args.prompt,
-        "musicgen_model_type": args.model,
-    })
-
-    # cleanup
-    nd.library.remove_collection(
-        collection_id=train_collection.id,
-        user_id=args.user_id,
-        remove_relationships=True,
-    )
-    [nd.library.remove_track(track.id, remove_relationships=True) for track in train_collection_list]
-
-    print("collection/" + args.add_to_collection_id)
+        print(f"collection/{args.target_id}")
 
 
 if __name__ == "__main__":

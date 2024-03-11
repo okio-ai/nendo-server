@@ -17,7 +17,22 @@ class ModelsHandler(ABC):
 
     def scan_available_models(self, user_id: str) -> List[str]:
         """Scan the available models from the users local model directory."""
-        models = []
+        facebook_models = [
+            "facebook/musicgen-small",
+            "facebook/musicgen-medium",
+            "facebook/musicgen-melody",
+            "facebook/musicgen-stereo-small",
+            "facebook/musicgen-stereo-medium",
+            "facebook/musicgen-stereo-melody",
+        ]
+
+        community_models = [
+            "pharoAIsanders420/musicgen-stereo-dub",
+            "pharoAIsanders420/musicgen-medium-hiphop",
+            "pharoAIsanders420/musicgen-small-dnb"
+        ]
+
+        models = facebook_models + community_models
 
         base_path = os.path.join(
             Path.home(), ".cache/nendo/models/musicgen/", user_id
@@ -25,5 +40,6 @@ class ModelsHandler(ABC):
         if not os.path.exists(base_path):
             return models
 
-        models = [model for model in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, model))]
+        models.extend([os.path.join(base_path, model) for model in os.listdir(base_path) if
+                       os.path.isdir(os.path.join(base_path, model))])
         return models

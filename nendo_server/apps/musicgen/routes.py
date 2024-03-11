@@ -49,12 +49,12 @@ async def run_musicgeneration(
             prompt=params["musicgen"]["prompt"],
             temperature=float(params["musicgen"]["temperature"]),
             cfg_coef=float(params["musicgen"]["cfg"]),
+            model=params["musicgen"]["model"],
             add_to_collection_id=add_to_collection_id,
             # n_samples=params["n_samples"],
             # bpm=int(params["bpm"]),
             # key=params["key"],
             # scale=params["scale"],
-            # model=params["model"],
             # duration=params["duration"],
             # seed=params["seed"],
         )

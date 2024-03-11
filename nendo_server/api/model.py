@@ -1,21 +1,15 @@
 from api.response import NendoHTTPResponse
 from api.utils import APIRouter
+from auth.auth_db import User
 from auth.auth_users import fastapi_users
-from dto.core import CollectionSmall, TrackSmall
-from fastapi import Body, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Depends, HTTPException
 from handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
-from pydantic import BaseModel
-from api.utils import APIRouter
-
-from nendo_server.auth.auth_db import User
-from nendo_server.handler.nendo_handler_factory import HandlerType, NendoHandlerFactory
-from nendo_server.handler.nendo_models_handler import ModelsHandler
+from handler.nendo_models_handler import ModelsHandler
 
 router = APIRouter()
 
-@router.options("/", name="tracks:options", response_model=NendoHTTPResponse)
-async def get_tracks_options(
+@router.options("/", name="models:options", response_model=NendoHTTPResponse)
+async def get_models_options(
         user: User = Depends(fastapi_users.current_user()),
         handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
 ):

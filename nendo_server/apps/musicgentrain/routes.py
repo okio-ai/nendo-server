@@ -32,7 +32,7 @@ async def run_musicgen_training(
             user_id=str(user.id),
             image="nendo/musicgentrain",
             gpu=True,
-            script_path="musicgen/musicgentrain.py",
+            script_path="musicgentrain/musicgentrain.py",
             plugins=[
                 "nendo_plugin_musicgen",
                 "nendo_plugin_stemify_demucs",
@@ -45,10 +45,15 @@ async def run_musicgen_training(
             run_without_target=True,
             max_track_duration=-1.,
             max_chunk_duration=-1.,
-            func_timeout=0,
+            action_timeout=None,
+            track_processing_timeout=None,
             target_id=target_id,
             prompt=params["musicgentrain"]["prompt"],
-            temperature=params["musicgentrain"]["model"],
+            model=params["musicgentrain"]["model"],
+            remove_vocals=params["musicgentrain"]["remove_vocals"],
+            batch_size=params["musicgentrain"]["batch_size"],
+            epochs=params["musicgentrain"]["epochs"],
+            lr=params["musicgentrain"]["lr"],
             add_to_collection_id=add_to_collection_id,
         )
     except Exception as e:
