@@ -39,7 +39,8 @@ async def run_getpage(
             env={
               "embedding_plugin": "nendo_plugin_embed_uae",
             },
-            func_timeout=0,
+            action_timeout=None,
+            track_processing_timeout=None,
             target_id=target_id,
         )
     except Exception as e:

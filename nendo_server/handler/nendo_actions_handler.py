@@ -38,7 +38,8 @@ def dockerized_func(
     exec_run: bool = False,
     replace_plugin_data: bool = False,
     env: Optional[dict] = None,
-    func_timeout: int = 0,  # 0 means no timeout
+    action_timeout: Optional[int] = None,
+    track_processing_timeout: Optional[int] = None,
 ) -> str:
     """Run python code in a docker container.
 
@@ -46,9 +47,14 @@ def dockerized_func(
     ----
         user_id (str): The ID of the user calling the action.
         image (str): The name of the docker image in which to run the code.
-        plugins (List[str]): List of plugins to configure nendo with.
+        script_path (str): The path to the script to be run inside the container,
+            relative to the tools' root folder inside `nendo_server/apps/`.
         command (str): The python code to run in the container, formatted as a string.
-        cfg (BaseSettings): The Nendo configuration of the server.
+        plugins (List[str]): List of plugins to configure nendo with.
+        nendo_cfg (BaseSettings): The configuration of the Nendo core instance.
+        cfg (BaseSettings): The configuration of the Nendo API Server.
+        use_gpu (bool): Flag that determines whether the container should request
+            a GPU resource or not. Defaults to true.
         container_name (str, optional): The name of the docker container
             to use when running.
         exec_run (bool, optional): If True, an existing container with the name given as
@@ -60,9 +66,16 @@ def dockerized_func(
             Defaults to False.
         env (dict, optional): Dictionary containing custom environment variables for the action.
             Can be used to configure Nendo and its plugins.
-        func_timeout (int, optional): The timeout before the function will be considered
-            stalled and the container will be killed. If 0, no timeout detection will be
-            applied. Defaults to 0.
+        action_timeout (int, optional): The timeout before the action will be considered
+            stalled and the container will be killed. If -1, no timeout detection will be
+            applied and the task can run forever. If None, the default timeout from the server's
+            settings will be applied. Defaults to None.
+        track_processing_timeout (int, optional): The timeout to be applied to the
+            processing of individual tracks inside the action. If it is surpassed,
+            the processing is considered to be stuck and the track will be skipped.
+            If -1, no timeout detection will be applied and the processing can run
+            forever. If None, the default timeout from the server's settings will
+            be applied. Defaults to None.
 
     Returns:
     -------
@@ -73,6 +86,11 @@ def dockerized_func(
     use_gpu = use_gpu and cfg.use_gpu
     client = docker.from_env()
     image_name = image
+    track_timeout = (
+        track_processing_timeout if track_processing_timeout is not None else
+        cfg.default_track_processing_timeout
+    )
+    track_timeout = track_timeout if track_timeout != -1 else 31536000
     env_vars = {
         "LIBRARY_PLUGIN": cfg.container_library_plugin,
         "LIBRARY_PATH": cfg.container_library_path,
@@ -90,6 +108,7 @@ def dockerized_func(
         "COPY_TO_LIBRARY": nendo_cfg.copy_to_library,
         "AUTO_CONVERT": nendo_cfg.auto_convert,
         "SKIP_DUPLICATE": nendo_cfg.skip_duplicate,
+        "TRACK_PROCESSING_TIMEOUT": track_timeout,
     }
     if env is not None:
         env_vars.update(env)
@@ -108,7 +127,7 @@ def dockerized_func(
             "bind": "/home/nendo/run.py",
             "mode": "ro",
         },
-        "hf-models-cache": {
+        "nendo-platform_models-cache": {
             "bind": "/home/nendo/.cache/",
             "mode": "rw",
         },
@@ -120,7 +139,7 @@ def dockerized_func(
         if use_gpu is True:
             # configure GPU access
             device_requests = []
-            device_requests.append(DeviceRequest(count=-1, capabilities=[["gpu"]]))
+            device_requests.append(DeviceRequest(count=1, capabilities=[["gpu"]]))
             ulimits = [
                 docker.types.Ulimit(name="memlock", soft=-1, hard=-1),
                 docker.types.Ulimit(name="stack", soft=67108864, hard=67108864),
@@ -155,7 +174,12 @@ def dockerized_func(
             elapsed_time = (current_time - start_time).total_seconds()
 
             # Check if the timeout has been reached
-            if (func_timeout > 0) and (elapsed_time > func_timeout):
+            timeout = (
+                action_timeout if action_timeout is not None else
+                cfg.default_action_timeout
+            )
+            timeout = timeout if timeout != -1 else 31536000
+            if (timeout > 0) and (elapsed_time > timeout):
                 print(f"Timeout reached. Stopping container {container.id}")
                 container.stop()
                 break
@@ -295,7 +319,8 @@ class NendoActionsHandler:
         max_track_duration: float,
         max_chunk_duration: float,
         env: Optional[dict] = None,
-        func_timeout: int = 0,
+        action_timeout: Optional[int] = None,
+        track_processing_timeout: Optional[int] = None,
         **kwargs, # these are the parameters for the action script
     ) -> str:
         # get queues
@@ -310,19 +335,23 @@ class NendoActionsHandler:
         container_name = container_name if exec_run is True else job_id
         
         target_id = kwargs.get("target_id", "")
-        track_or_collection = self.nendo_instance.get_track_or_collection(
+        target_obj = self.nendo_instance.get_track_or_collection(
             target_id,
         )
         target = {}
-        if track_or_collection is not None:
+        if target_obj is not None:
             target.update({
                 "target_type": (
-                    "track" if isinstance(track_or_collection, NendoTrack) else
+                    "track" if isinstance(target_obj, NendoTrack) else
                     "collection",
                 )
             })
             target.update({
                 "target_id": target_id,
+                "target_title": (
+                    target_obj.meta['title'] if isinstance(target_obj, NendoTrack) else
+                    target_obj.name
+                ),
             })
         target_collections = []
         skipped_tracks = []
@@ -333,19 +362,19 @@ class NendoActionsHandler:
         ):
             track_ids = []
             # create a single chunk with the track in it
-            if isinstance(track_or_collection, NendoTrack):
+            if isinstance(target_obj, NendoTrack):
                 # get track duration
-                duration = track_or_collection.get_meta("duration")
+                duration = target_obj.get_meta("duration")
                 if duration is None:
                     duration = round(librosa.get_duration(
-                        y=track_or_collection.signal,
-                        sr=track_or_collection.sr
+                        y=target_obj.signal,
+                        sr=target_obj.sr
                     ), 1)
                 # skip track if duration exceeds maximum
                 if max_track_duration > 0. and duration > max_track_duration:
-                    skipped_tracks.append(track_or_collection.get_meta("title"))
+                    skipped_tracks.append(target_obj.get_meta("title"))
                 else:
-                    track_ids.append(track_or_collection.id)
+                    track_ids.append(target_obj.id)
                 chunk_collection = self.nendo_instance.add_collection(
                     name=job_id,
                     user_id=user_id,
@@ -355,8 +384,8 @@ class NendoActionsHandler:
                 target_collections.append(chunk_collection.id)
             else:
                 # split collection into chunks
-                if isinstance(track_or_collection, NendoCollection):
-                    tracks = track_or_collection.tracks()
+                if isinstance(target_obj, NendoCollection):
+                    tracks = target_obj.tracks()
                 # split the library into chunks
                 else:
                     tracks = self.nendo_instance.library.get_tracks(
@@ -404,16 +433,16 @@ class NendoActionsHandler:
                             target_collections.append(chunk_collection.id)
                             chunk_duration = 0.
         else:
-            if isinstance(track_or_collection, NendoTrack):
+            if isinstance(target_obj, NendoTrack):
                 temp_collection = self.nendo_instance.library.add_collection(
                     name=job_id,
                     user_id=user_id,
-                    track_ids=[track_or_collection.id],
+                    track_ids=[target_obj.id],
                     collection_type="temp",
                 )
                 target_collections.append(temp_collection.id)
-            elif isinstance(track_or_collection, NendoCollection):
-                target_collections.append(track_or_collection.id)
+            elif isinstance(target_obj, NendoCollection):
+                target_collections.append(target_obj.id)
             elif run_without_target is False:
                 all_tracks = self.nendo_instance.library.get_tracks(user_id=user_id)
                 temp_collection = self.nendo_instance.library.add_collection(
@@ -448,11 +477,12 @@ class NendoActionsHandler:
                 exec_run,
                 replace_plugin_data,
                 env,
-                func_timeout,
+                action_timeout,
+                track_processing_timeout,
                 description=action_name,  # TODO improve description?
                 job_id=f"{job_id}_{i}",  # use custom job id (for in-job status reporting)
-                job_timeout="72h",  # TODO: make this configurable?
-                result_ttl="172800",  # 2 days retention of completed jobs
+                job_timeout=-1,
+                result_ttl="604800",  # 7 days retention of completed jobs
             )
             action.meta["action_name"] = action_name
             action.meta["parameters"] = pprint.pformat(kwargs)

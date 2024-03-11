@@ -3,47 +3,33 @@
 """Voice Analysis app."""
 import argparse
 import gc
+import os
 import re
-import signal
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 import redis
 import torch
 from nendo import Nendo, NendoTrack
 from rq.job import Job
-
-TIMEOUT = 600
-
-
-def timeout_handler(num, stack):
-    raise TimeoutError("Operation timed out")
+from wrapt_timeout_decorator import timeout
 
 
-def process_tracks_with_timeout(
+@timeout(int(os.getenv("TRACK_PROCESSING_TIMEOUT")))
+def process_track(
         job: Job,
-        timeout: int,
         progress_info: str,
-        tracks: List[NendoTrack],
+        track: NendoTrack,
         func: Callable,
         **kwargs: Any,
 ):
-    for i, track in enumerate(tracks):
-        signal.alarm(timeout)
-        try:
-            job.meta["progress"] = f"{progress_info} Track {i + 1}/{len(tracks)}"
-            job.save_meta()
-            func(track=track, **kwargs)
-        except Exception as e:
-            if "Operation timed out" in str(e):
-                err = f"Error processing track {track.id}: Operation Timed Out"
-            else:
-                err = f"Error processing track {track.id}: {e}"
-            # nd.logger.info(err)
-            job.meta["errors"] = job.meta["errors"] + [err]
-            job.save_meta()
-            raise
-        finally:
-            signal.alarm(0)
+    try:
+        job.meta["progress"] = progress_info
+        job.save_meta()
+        func(track=track, **kwargs)
+    except Exception as e:
+        err = f"Error processing track {track.id}: {e}"
+        job.meta["errors"] = job.meta["errors"] + [err]
+        job.save_meta()
 
 
 def free_memory(to_delete: Any):
@@ -139,20 +125,32 @@ def main():
     )
     tracks = target_collection.tracks()
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Transcribing", tracks, nd.plugins.transcribe_whisper,
-        return_timestamps=True,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"Transcribing Track {i + 1}/{len(tracks)}",
+            track,
+            nd.plugins.transcribe_whisper,
+            return_timestamps=True,
+        )
     free_memory(nd.plugins.transcribe_whisper.plugin_instance.pipe)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "LLM Analyzing", tracks, llm_analysis,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"LLM Analyzing Track {i + 1}/{len(tracks)}",
+            track,
+            llm_analysis,
+        )
     free_memory(nd.plugins.textgen.plugin_instance.model)
 
-    process_tracks_with_timeout(
-        job, TIMEOUT, "Embedding", tracks, nd.library.embed_track,
-    )
+    for i, track in enumerate(tracks):
+        process_track(
+            job,
+            f"Embedding Track {i + 1}/{len(tracks)}",
+            track,
+            nd.library.embed_track,
+        )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
     if (target_collection.collection_type == "temp"):
