@@ -62,7 +62,7 @@ class LocalNendoHandlerFactory(NendoHandlerFactory):
 class RemoteNendoHandlerFactory(NendoHandlerFactory):
     def create(self, handler_type: HandlerType):
         if handler_type == HandlerType.TRACKS:
-            return RemoteTracksHandler(self.nendo_instance, self.logger)
+            return RemoteTracksHandler(self.nendo_instance, self.db, self.logger)
         if handler_type == HandlerType.ASSETS:
             # TODO re-enable GCS support at some point
             # return RemoteAssetsHandler(self.nendo_instance, self.logger)

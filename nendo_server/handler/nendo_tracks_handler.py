@@ -6,12 +6,16 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from handler.filters import TrackFilter, get_track_filters
+from sqlalchemy import asc, desc
+from sqlalchemy.orm import Session, Query
+
+from nendo_server.db import PostgresDB
 
 if TYPE_CHECKING:
     import logging
     import uuid
 
-    from nendo import Nendo, NendoTrack
+    from nendo import Nendo, NendoTrack, NendoPluginDataDB, NendoTrackDB
 
 
 class NendoTracksHandler(ABC):
@@ -173,9 +177,39 @@ class NendoTracksHandler(ABC):
         raise NotImplementedError
 
 
+def _get_order_query(
+    session: Session,
+    query: Query,
+    order_by: Optional[str] = None,
+    order: Optional[str] = None,
+) -> Query:
+    unique_plugin_data_keys = session.query(NendoPluginDataDB.key).distinct().all()
+    unique_meta_keys = session.query(NendoTrackDB.meta.key).distinct().all()
+    if order_by in unique_plugin_data_keys:
+        query = query.join(
+            NendoPluginDataDB,
+            NendoPluginDataDB.track_id == NendoTrackDB.id,
+            NendoPluginDataDB.user_id == NendoTrackDB.user_id,
+        ).filter(
+            NendoPluginDataDB.key == order_by
+        )
+        if order == "asc":
+            return query.order_by(asc(NendoPluginDataDB.value))
+        return query.order_by(desc(NendoPluginDataDB.value))
+    elif order_by in unique_meta_keys:
+        query = query.filter(
+            NendoTrackDB.meta.key == order_by,
+        )
+        if order == "asc":
+            return query.order_by(asc(NendoTrackDB.meta.value))
+        return query.order_by(desc(NendoTrackDB.meta.value))
+    return query
+
+
 class LocalTracksHandler(NendoTracksHandler):
-    def __init__(self, nendo_instance, logger):
+    def __init__(self, nendo_instance: Nendo, db: PostgresDB, logger: logging.Logger):
         self.nendo_instance = nendo_instance
+        self.db = db
         self.logger = logger
 
     def get_track(self, track_id: str, user_id: str):
@@ -199,16 +233,31 @@ class LocalTracksHandler(NendoTracksHandler):
         order: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Tuple[List[NendoTrack], int]:
-        tracks = self.nendo_instance.library.filter_tracks_by_meta(
-            search_meta=search_meta,
-            filters=filters,
-            collection_id=collection_id,
-            track_type=track_type,
-            order_by=order_by,
-            order=order,
-            offset=offset,
+        with self.db.session_scope() as session:
+            query = self.nendo_instance.library_get_filtered_tracks_query(
+                session=session,
+                filters=filters,
+                search_meta=[],
+                track_type=track_type,
+                user_id=user_id,
+                collection_id=collection_id
+            )
+            query = self.nendo_instance.library._get_meta_filter_query(
+                query=query,
+                search_meta=search_meta,
+            )
+            query = _get_order_query(
+                session=session,
+                query=query,
+                order_by=order_by,
+                order=order,
+            )
+        tracks = self.nendo_instance.library.get_tracks(
+            query=query,
             limit=limit,
-            user_id=user_id,
+            offset=offset,
+            load_related_tracks=False,
+            session=session,
         )
         num_results = self.nendo_instance.library.count_filtered_tracks_by_meta(
             search_meta=search_meta,
