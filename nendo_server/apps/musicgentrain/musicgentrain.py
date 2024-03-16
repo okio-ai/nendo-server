@@ -59,7 +59,7 @@ def process_track(
 
 
 def split_vocal(track: NendoTrack, nd: Nendo, result_list: List[NendoTrack]):
-    stems = nd.plugins.stemify_demucs(track=track, stem_types=["vocals", "no_vocals"])
+    stems = nd.plugins.stemify_demucs(track=track, stem_types=["vocals", "no_vocals"], filter_silent=False)
     vocals, no_vocals = stems[0], stems[1]
 
     # remove unused track
@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--remove_vocals", action="store_true", default=False)
+    parser.add_argument("--run_analysis", action="store_true", default=False)
     parser.add_argument("--batch_size", type=int, required=True)
     parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--lr", type=float, required=True)
@@ -126,14 +127,15 @@ def main():
 
         free_memory(nd.plugins.stemify_demucs.plugin_instance)
 
-        for i, track in enumerate(train_collection_list):
-            process_track(
-                job,
-                f"Analyzing Track {i + 1}/{len(tracks)}",
-                track,
-                nd.plugins.classify_core,
-            )
-        free_memory(nd.plugins.classify_core.plugin_instance)
+        if args.run_analysis:
+            for i, track in enumerate(train_collection_list):
+                process_track(
+                    job,
+                    f"Analyzing Track {i + 1}/{len(tracks)}",
+                    track,
+                    nd.plugins.classify_core,
+                )
+            free_memory(nd.plugins.classify_core.plugin_instance)
 
         train_collection = nd.library.add_collection(
             name="Musicgen Training",

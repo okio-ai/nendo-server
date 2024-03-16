@@ -51,6 +51,7 @@ async def run_musicgen_training(
             prompt=params["musicgentrain"]["prompt"],
             model=params["musicgentrain"]["model"],
             remove_vocals=params["musicgentrain"]["remove_vocals"],
+            run_analysis=params["musicgentrain"]["run_analysis"],
             batch_size=params["musicgentrain"]["batch_size"],
             epochs=params["musicgentrain"]["epochs"],
             lr=params["musicgentrain"]["lr"],
