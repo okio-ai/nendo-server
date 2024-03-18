@@ -3,6 +3,7 @@
 # ruff: noqa: BLE001, T201, I001
 import argparse
 import gc
+from pathlib import Path
 import os
 import uuid
 from typing import Any
@@ -95,13 +96,25 @@ def main():
     job.meta["progress"] = f"Generating {args.n_samples} Tracks"
     job.save_meta()
 
+    if "local" in args.model:
+        model_path = os.path.join(
+            Path.home(), ".cache/nendo/models/musicgen/", args.user_id,
+            args.model.split("//")[1],
+        )
+        if not os.path.exists(model_path):
+            job.meta["errors"].append(f"Model {args.model} not found")
+            job.save_meta()
+            return
+    else:
+        model_path = args.model
+
     generations = nd.plugins.musicgen(
         n_samples=args.n_samples,
         prompt=args.prompt,
         bpm=args.bpm,
         key=args.key,
         scale=args.scale,
-        model=args.model,
+        model=model_path,
         duration=args.duration,
         temperature=args.temperature,
         cfg_coef=args.cfg_coef,

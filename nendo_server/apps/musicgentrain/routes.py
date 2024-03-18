@@ -49,6 +49,7 @@ async def run_musicgen_training(
             track_processing_timeout=None,
             target_id=target_id,
             prompt=params["musicgentrain"]["prompt"],
+            output_model_name=params["musicgentrain"]["output_model_name"],
             model=params["musicgentrain"]["model"],
             remove_vocals=params["musicgentrain"]["remove_vocals"],
             run_analysis=params["musicgentrain"]["run_analysis"],

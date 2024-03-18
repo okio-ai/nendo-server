@@ -1,6 +1,7 @@
 # -*- encoding: utf-8 -*-
 """Musicgeneration app."""
 import argparse
+import random
 import gc
 import os
 # ruff: noqa: BLE001, T201, I001
@@ -77,6 +78,7 @@ def main():
     parser.add_argument("--job_id", type=str, required=False)
     parser.add_argument("--target_id", type=str, required=False)
     parser.add_argument("--add_to_collection_id", type=str, required=False)
+    parser.add_argument("--output_model_name", type=str, required=True)
 
     # Musicgen specific arguments
     parser.add_argument("--prompt", type=str, required=True)
@@ -147,8 +149,8 @@ def main():
         job.meta["progress"] = f"Started Musicgen training, this might take a while..."
         job.save_meta()
 
-        output_dir = Path.home() / ".cache" / "nendo" / "models" / "musicgen" / str(
-            args.user_id) / target_collection.name.replace(" ", "_")
+        output_dir = Path.home() / ".cache/nendo/models/musicgen" / str(
+            args.user_id) / target_collection.name.strip().replace(" ", "_") / args.output_model_name
 
         if output_dir.exists():
             shutil.rmtree(output_dir)

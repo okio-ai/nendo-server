@@ -40,6 +40,6 @@ class ModelsHandler(ABC):
         if not os.path.exists(base_path):
             return models
 
-        models.extend([os.path.join(base_path, model) for model in os.listdir(base_path) if
+        models.extend([f"local//{model}" for model in os.listdir(base_path) if
                        os.path.isdir(os.path.join(base_path, model))])
         return models
