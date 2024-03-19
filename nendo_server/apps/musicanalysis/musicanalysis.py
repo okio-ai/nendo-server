@@ -83,18 +83,18 @@ def main():
             job,
             f"Analyzing Track {i + 1}/{len(tracks)}",
             track,
-            nd.plugins.classify_core,
+            nd.plugins.caption_lpmusiccaps,
         )
-    free_memory(nd.plugins.classify_core.plugin_instance)
+    free_memory(nd.plugins.caption_lpmusiccaps.plugin_instance.model)
 
     for i, track in enumerate(tracks):
         process_track(
             job,
             f"Analyzing Track {i + 1}/{len(tracks)}",
             track,
-            nd.plugins.caption_lpmusiccaps,
+            nd.plugins.classify_core,
         )
-    free_memory(nd.plugins.caption_lpmusiccaps.plugin_instance.model)
+    free_memory(nd.plugins.classify_core.plugin_instance)
 
     for i, track in enumerate(tracks):
         process_track(
@@ -105,7 +105,7 @@ def main():
         )
     free_memory(nd.plugins.embed_clap.plugin_instance)
 
-    if (target_collection.collection_type == "temp"):
+    if target_collection.collection_type == "temp":
         nd.library.remove_collection(
             collection_id=target_collection.id,
             user_id=args.user_id,

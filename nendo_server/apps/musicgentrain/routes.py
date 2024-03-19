@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.post("")
-async def run_musicgeneration(
+async def run_musicgen_training(
     target_id: Optional[str] = Query(None),
     replace: bool = Query(False),
     add_to_collection_id: str = Query(""),
@@ -20,7 +20,7 @@ async def run_musicgeneration(
     handler_factory: NendoHandlerFactory = Depends(NendoHandlerFactory),
     user: User = Depends(fastapi_users.current_user()),
 ):
-    """Generate a track with musicgeneration."""
+    """Train a model based on MusicGen with a collection."""
     actions_handler = handler_factory.create(handler_type=HandlerType.ACTIONS)
 
     assets_handler = handler_factory.create(handler_type=HandlerType.ASSETS)
@@ -30,33 +30,33 @@ async def run_musicgeneration(
     try:
         action_id = actions_handler.create_docker_action(
             user_id=str(user.id),
-            image="nendo/musicgen",
+            image="nendo/musicgentrain",
             gpu=True,
-            script_path="musicgen/musicgen.py",
+            script_path="musicgentrain/musicgentrain.py",
             plugins=[
                 "nendo_plugin_musicgen",
+                "nendo_plugin_stemify_demucs",
+                "nendo_plugin_classify_core",
             ],
-            action_name="Music Generation",
+            action_name="MusicGen training",
             container_name="",
             exec_run=False,
             replace_plugin_data=replace,
             run_without_target=True,
             max_track_duration=-1.,
             max_chunk_duration=-1.,
-            action_timeout=240,
+            action_timeout=None,
             track_processing_timeout=None,
             target_id=target_id,
-            prompt=params["musicgen"]["prompt"],
-            temperature=float(params["musicgen"]["temperature"]),
-            cfg_coef=float(params["musicgen"]["cfg"]),
-            model=params["musicgen"]["model"],
+            prompt=params["musicgentrain"]["prompt"],
+            output_model_name=params["musicgentrain"]["output_model_name"],
+            model=params["musicgentrain"]["model"],
+            remove_vocals=params["musicgentrain"]["remove_vocals"],
+            run_analysis=params["musicgentrain"]["run_analysis"],
+            batch_size=params["musicgentrain"]["batch_size"],
+            epochs=params["musicgentrain"]["epochs"],
+            lr=params["musicgentrain"]["lr"],
             add_to_collection_id=add_to_collection_id,
-            # n_samples=params["n_samples"],
-            # bpm=int(params["bpm"]),
-            # key=params["key"],
-            # scale=params["scale"],
-            # duration=params["duration"],
-            # seed=params["seed"],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Nendo error: {e}") from e
